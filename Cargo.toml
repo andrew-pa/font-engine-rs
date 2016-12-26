@@ -5,3 +5,4 @@ authors = ["Andrew <andrew.pa@outlook.com>"]
 
 [dependencies]
 byteorder = "0.5.3"
+bitflags = "0.7.0"
