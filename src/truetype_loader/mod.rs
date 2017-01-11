@@ -4,6 +4,7 @@ use std::fmt;
 use std::fmt::{Debug};
 use std::mem;
 use std::fs::File;
+use std::rc::Rc;
 use byteorder::{ByteOrder, BigEndian, ReadBytesExt};
 
 /*
@@ -90,6 +91,8 @@ trait Table : Debug {
 
 mod char_glyph_mapping_table;
 use self::char_glyph_mapping_table::*;
+mod glyph_data_table;
+use self::glyph_data_table::*;
 
 struct ControlValueTable(Vec<i16>);
 
@@ -158,73 +161,6 @@ impl GASPTable {
     }
 }
 
-
-
-#[derive(Debug)]
-struct ComponentGlyphDescription {
-    flags: u16,
-    glyph_index: u16,
-    // TODO: there is a bunch of wierd variable length stuff in here
-}
-
-#[derive(Debug)]
-enum GlyphDescription {
-    None,
-    Simple {
-        end_points_of_contours: Vec<u16>,
-        instructions: Vec<u8>,
-        flags: Vec<u8>,
-        xcoord: i16,
-        ycoord: i16
-    },
-    Compound(Vec<ComponentGlyphDescription>)
-}
-
-// apparently this table is useless
-#[derive(Debug)]
-struct GlyphDataTable {
-    num_contours: u16,
-    x_min: i16,
-    y_min: i16,
-    x_max: i16,
-    y_max: i16,
-    glyph_desc: GlyphDescription
-
-}
-
-impl Table for GlyphDataTable {
-    fn tag(&self) -> TableTag { TableTag::GlyphData }
-}
-
-impl GlyphDataTable {
-    fn from_binary<R: Read+Seek>(reader: &mut R) -> io::Result<GlyphDataTable> {
-        let num_contours = reader.read_i16::<BigEndian>()?;
-        let x_min = reader.read_i16::<BigEndian>()?;
-        let y_min = reader.read_i16::<BigEndian>()?;
-        let x_max = reader.read_i16::<BigEndian>()?;
-        let y_max = reader.read_i16::<BigEndian>()?;
-        if num_contours > 0 {
-           Ok(GlyphDataTable {
-               num_contours: num_contours as u16,
-               x_min: x_min,
-               y_min: y_min,
-               x_max: x_max,
-               y_max: y_max,
-               glyph_desc: GlyphDescription::None
-           })
-        } else {
-            Ok(GlyphDataTable {
-               num_contours: 0,
-               x_min: x_min,
-               y_min: y_min,
-               x_max: x_max,
-               y_max: y_max,
-               glyph_desc: GlyphDescription::None
-            })
-        }
-    }
-}
-
 enum DeviceRecord {
     Format0 {
         pixel_size: u8,
@@ -284,8 +220,8 @@ struct FontHeader {
     checksum: u32,
     flags: u16,
     units_per_em: u16,
-    created: u32,
-    modified: u32,
+    created: u64,
+    modified: u64,
     x_min: i16,
     y_min: i16,
     x_max: i16,
@@ -303,10 +239,10 @@ impl FontHeader {
             version: fixed::from_binary::<R,BigEndian>(reader)?,
             font_rev: fixed::from_binary::<R,BigEndian>(reader)?,
             checksum: reader.read_u32::<BigEndian>()?,
-            flags: reader.read_u16::<BigEndian>()?,
+            flags: { assert_eq!(reader.read_u32::<BigEndian>()?, 0x5f0f3cf5, "invalid magic"); reader.read_u16::<BigEndian>()? },
             units_per_em: reader.read_u16::<BigEndian>()?,
-            created: reader.read_u32::<BigEndian>()?,
-            modified: reader.read_u32::<BigEndian>()?,
+            created: reader.read_u64::<BigEndian>()?,
+            modified: reader.read_u64::<BigEndian>()?,
             x_min: reader.read_i16::<BigEndian>()?,
             y_min: reader.read_i16::<BigEndian>()?,
             x_max: reader.read_i16::<BigEndian>()?,
@@ -325,7 +261,7 @@ impl Table for FontHeader {
 }
 
 #[derive(Copy,Clone,Debug)]
-struct MaxProfileTable {
+pub struct MaxProfileTable {
     version: fixed,
     num_glyphs: u16,
     num_points: u16,
@@ -369,6 +305,36 @@ impl MaxProfileTable {
     }
 }
 
+#[derive(Clone)]
+pub struct LocationTable {
+    offsets: Vec<u32>
+}
+
+impl Debug for LocationTable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "LocationTable len={}", self.offsets.len())
+    }
+}
+
+impl Table for LocationTable {
+    fn tag(&self) -> TableTag { TableTag::LocationIndex }
+}
+
+impl LocationTable {
+    fn from_binary<R: Read + Seek>(reader: &mut R, num_glyphs: usize, format: i16) -> io::Result<LocationTable> {
+        Ok(LocationTable {
+            offsets: {
+                let mut v = Vec::new();
+                for i in 0..(num_glyphs+1) {
+                    v.push(if format == 1 { reader.read_u32::<BigEndian>()? } else { reader.read_u16::<BigEndian>()? as u32 *2 }) 
+                }
+                v
+            }
+        })
+    }
+}
+
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 struct TableDirectoryEntry {
@@ -393,7 +359,7 @@ struct OffsetTable {
     entry_selector: u16,
     range_shift: u16,
     table_directory: Vec<TableDirectoryEntry>,
-    tables: Vec<Box<Table>>
+    tables: Vec<Rc<Table>>
 }
 
 impl OffsetTable {
@@ -408,42 +374,55 @@ impl OffsetTable {
             let tbe = TableDirectoryEntry::from_binary(reader)?;
             match tbe.tag {
                 TableTag::MaxProfile => table_directory.insert(0, tbe),
+                TableTag::FontHeader => table_directory.insert(1, tbe),
+                TableTag::LocationIndex => table_directory.insert(2, tbe),
                 _ => table_directory.push(tbe)
             }
         }
         println!("table directory: {:?}", table_directory);
-        let mut tables = Vec::<Box<Table>>::new();
+        let mut tables = Vec::<Rc<Table>>::new();
         let mut maxp_table : Option<MaxProfileTable> = None;
+        let mut head_table : Option<FontHeader> = None;
+        let mut loca_table : Option<Rc<LocationTable>> = None;
         for tde in &table_directory {
             reader.seek(io::SeekFrom::Start(tde.offset as u64));
             tables.push(match tde.tag {
                 TableTag::CharGlyphMapping =>
-                   Box::new(char_glyph_mapping_table::CharGlyphMappingTable::from_binary(reader, tde.offset as u64)?),
+                   Rc::new(char_glyph_mapping_table::CharGlyphMappingTable::from_binary(reader, tde.offset as u64)?),
                 TableTag::ControlValue => {
                     let mut tbl = Vec::with_capacity((tde.length/2) as usize);
                     for i in 0..tde.length {
                         tbl.push(reader.read_i16::<BigEndian>()?);
                     }
-                    Box::new(ControlValueTable(tbl))
+                    Rc::new(ControlValueTable(tbl))
                 },
                 TableTag::FontProgram => {
                     let mut tbl = vec![0u8; tde.length as usize];
                     reader.read_exact(tbl.as_mut_slice())?;
-                    Box::new(FontProgram(tbl))
+                    Rc::new(FontProgram(tbl))
                 },
                 TableTag::GridFitAndScanConvertProc => 
-                    Box::new(GASPTable::from_binary(reader)?),
+                    Rc::new(GASPTable::from_binary(reader)?),
                 TableTag::GlyphData =>
-                    Box::new(GlyphDataTable::from_binary(reader)?),
+                    Rc::new(GlyphDataTable::from_binary(reader, tde.offset as u64, 
+                                    maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before glyf table!"))?,
+                                    loca_table.clone().ok_or(io::Error::new(io::ErrorKind::Other, "Must load loca table before glyf table!"))?)?),
+                TableTag::LocationIndex => {
+                    loca_table = Some(Rc::new(LocationTable::from_binary(reader, 
+                                    maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before loca table!"))?.num_glyphs as usize,
+                                    head_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load head table before loca table!"))?.index_to_locformat)?));
+                    loca_table.clone().unwrap()
+                },
                 TableTag::HorizDevMetric =>
-                    Box::new(HorizDeviceMetricsTable::from_binary(reader, 
-                                maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before hdmx table!"))?.num_glyphs as usize)?),
+                    Rc::new(HorizDeviceMetricsTable::from_binary(reader, 
+                                    maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before hdmx table!"))?.num_glyphs as usize)?),
                 TableTag::FontHeader => 
-                    Box::new(FontHeader::from_binary(reader)?),
+                    Rc::new({ let v = FontHeader::from_binary(reader)?; head_table = Some(v); v }),
                 TableTag::MaxProfile => {
                     let mpt = MaxProfileTable::from_binary(reader)?; 
                     maxp_table = Some(mpt);
-                    Box::new(mpt)
+                    println!("got maxp table = {:?}", mpt);
+                    Rc::new(mpt)
                 }
                 _ =>  { println!("Unknown table tag: {:?}!", tde.tag); continue; }
             })
@@ -475,7 +454,11 @@ mod tests {
     fn test_header() {
 
         //this needs to be changed to be xplat, probably a font in the repo
-        let mut font_file = File::open("C:\\Windows\\Fonts\\arial.ttf").unwrap();
+        let mut font_file = File::open(
+            //"C:\\Windows\\Fonts\\arial.ttf"
+            "FantasqueSansMono-Regular.ttf"
+            //"uu.ttf"
+            ).unwrap();
 
         let otbl = OffsetTable::from_binary(&mut font_file).unwrap();
         println!("OffsetTable = {:?}", otbl);
