@@ -417,7 +417,7 @@ impl OffsetTable {
                     Rc::new(HorizDeviceMetricsTable::from_binary(reader, 
                                     maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before hdmx table!"))?.num_glyphs as usize)?),
                 TableTag::FontHeader => 
-                    Rc::new({ let v = FontHeader::from_binary(reader)?; head_table = Some(v); v }),
+                    Rc::new({ let v = FontHeader::from_binary(reader)?; println!("got head table = {:?}", v); head_table = Some(v); v }),
                 TableTag::MaxProfile => {
                     let mpt = MaxProfileTable::from_binary(reader)?; 
                     maxp_table = Some(mpt);
@@ -455,9 +455,10 @@ mod tests {
 
         //this needs to be changed to be xplat, probably a font in the repo
         let mut font_file = File::open(
-            //"C:\\Windows\\Fonts\\arial.ttf"
-            "FantasqueSansMono-Regular.ttf"
+            "C:\\Windows\\Fonts\\arial.ttf"
+            //"FantasqueSansMono-Regular.ttf"
             //"uu.ttf"
+            //"test.TTF"
             ).unwrap();
 
         let otbl = OffsetTable::from_binary(&mut font_file).unwrap();
