@@ -42,11 +42,24 @@ pub struct ComponentGlyphDescription {
     use_metrics: bool
 }
 
+
+bitflags! {
+    flags GlyphPointFlags: u8 {
+        const GP_RESERVED       = 0b1100_0000,
+        const GP_OnCurve        = 0b0000_0001,
+        const GP_XShortVec      = 0b0000_0010,
+        const GP_YShortVec      = 0b0000_0100,
+        const GP_Repeat         = 0b0000_1000,
+        const GP_XSameOrVecSign = 0b0001_0000,
+        const GP_YSameOrVecSign = 0b0010_0000,
+    }
+}
+
 #[derive(Debug)]
 pub struct GlyphPoint {
     on_curve: bool,
     x: i16, y: i16,
-
+    flag: GlyphPointFlags
 }
 
 pub enum GlyphDescription {
@@ -82,22 +95,12 @@ impl Debug for GlyphDescription {
     }
 }
 
-bitflags! {
-    flags GlyphPointFlags: u8 {
-        const GP_RESERVED       = 0b1100_0000,
-        const GP_XShortVec      = 0b0000_0010,
-        const GP_YShortVec      = 0b0000_0100,
-        const GP_Repeat         = 0b0000_1000,
-        const GP_XSameOrVecSign = 0b0001_0000,
-        const GP_YSameOrVecSign = 0b0010_0000,
-    }
-}
-
 impl GlyphDescription {
     fn from_binary<R: Read+Seek>(reader: &mut R, num_points: usize, glyph_length: usize) -> io::Result<GlyphDescription> {
         println!("reading glyph p{} l{}", num_points, glyph_length);
         if glyph_length == 0 { println!("0-len glyph?"); return Ok(GlyphDescription::None); }
         let num_contours = reader.read_i16::<BigEndian>()?;
+        println!("num contours = {}", num_contours);
         let x_min = reader.read_i16::<BigEndian>()?;
         let y_min = reader.read_i16::<BigEndian>()?;
         let x_max = reader.read_i16::<BigEndian>()?;
@@ -108,6 +111,7 @@ impl GlyphDescription {
             for i in 0..num_contours {
                 epoc.push(reader.read_u16::<BigEndian>()?);
             }
+            println!("end points of contours = {:?}", epoc);
             let num_instr = reader.read_u16::<BigEndian>()?;
             let mut instr = vec![0u8; num_instr as usize];
             reader.read_exact(instr.as_mut_slice())?;
@@ -116,17 +120,18 @@ impl GlyphDescription {
             //println!("epocl={},instrl={},dl={}", epoc.len(), instr.len(), data.len()); 
             reader.read_exact(data.as_mut_slice())?;
             let mut points = Vec::new();
-            let mut ix: usize = 0; let mut iy: usize = 0; let mut ifl: usize = 0;
-            let mut lastx: i16 = 0; let mut lasty: i16 = 0; let mut rcsum: usize = 0;
-            while ifl < data.len() {
-                let d0 = data[ifl];
+            let mut i: usize = 0; let mut rcsum: usize = 0;
+            let n = (epoc[epoc.len()-1]+1) as usize;
+            while i < data.len() {
+                let d0 = data[i];
                 let flag = GlyphPointFlags::from_bits_truncate(d0);
                 println!("point [ flags = {:b}/{:?} ]", d0, flag);
-                ifl += 1;
+                i += 1;
                 let repeat_count = 
                     if flag.intersects(GP_Repeat) {
-                        let v = data[ifl];
-                        ifl += 1;
+                        let v = data[i];
+                        println!("repeat = {}", v);
+                        i += 1;
                         v
                     } else {
                         1
@@ -136,14 +141,48 @@ impl GlyphDescription {
                     println!("point [ flags = {:b}/{:?}, repeat count = {} Sum{} ]", d0, flag, repeat_count, rcsum);
                 }*/
                 for ir in 0..repeat_count {
-                    points.push(GlyphPoint{on_curve: false, x: 0, y: 0});
-                    ix += if flag.intersects(GP_XShortVec) { 1 } else { 2 };
-                    iy += if flag.intersects(GP_YShortVec) { 1 } else { 2 };
+                    points.push(GlyphPoint{on_curve: flag.intersects(GP_OnCurve), x: 0, y: 0, flag: flag });
                 }
-                if points.len() >= num_points { break; }
+                if points.len() >= n { break; }
             }
-            println!("found {} points, ifl = {}, d.l = {}, ix+iy = {}", points.len(), ifl, data.len(),ix+iy);
-            //assert_eq!(points.len(), num_points);
+            println!("found {} points, ifl = {}, d.l = {}", points.len(), i, data.len());
+            assert!(points.len() < data.len(), "absurd number of points!");
+
+            fn load_vec(data: &Vec<u8>, i: &mut usize, last: &mut i16, short_vec: bool, sameorsign: bool) -> i16 {
+                /*if short_vec {
+                    let v = data[*i] as i16;
+                    println!("{}data={:x}", *i, v);
+                    *last = v;
+                    *i += 1; v * (if sameorsign { 1 } else { -1 }) 
+                } else {
+                    if sameorsign { println!("ldata={:x}", *last); return *last; }
+                    let v = (data[*i] as i16) << 8 & (data[*i+1] as i16);
+                    println!("{}data={:b}", *i, v);
+                    *last = v;
+                    *i += 2; v 
+                }*/
+                if short_vec {
+                    let v = (data[*i] as i16) * if sameorsign {1} else {-1};
+                    *last += v;
+                    *i += 1;
+                } else if !sameorsign {
+                    let v = ((data[*i] as i16) << 8) & (data[*i+1] as i16);
+                    *last += v;
+                    *i += 2;
+                }
+                println!("i{} v{}", *i, *last); 
+                *last
+            }
+
+            let mut last: i16 = 0;
+            for mut p in &mut points {
+                p.x = load_vec(&data, &mut i, &mut last, p.flag.intersects(GP_XShortVec), p.flag.intersects(GP_XSameOrVecSign));
+            }
+            last = 0;
+            for mut p in &mut points {
+                p.y = load_vec(&data, &mut i, &mut last, p.flag.intersects(GP_YShortVec), p.flag.intersects(GP_YSameOrVecSign));
+            }
+            //assert!(i == data.len() || i == data.len()-1, "should use up all the data");
             Ok(GlyphDescription::Simple {
                 num_contours: num_contours as u16,
                 x_min: x_min,

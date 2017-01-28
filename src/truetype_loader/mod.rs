@@ -455,7 +455,8 @@ mod tests {
 
         //this needs to be changed to be xplat, probably a font in the repo
         let mut font_file = File::open(
-            "C:\\Windows\\Fonts\\arial.ttf"
+            //"C:\\Windows\\Fonts\\arial.ttf"
+            "C:\\Windows\\Fonts\\comic.ttf"
             //"FantasqueSansMono-Regular.ttf"
             //"uu.ttf"
             //"test.TTF"
