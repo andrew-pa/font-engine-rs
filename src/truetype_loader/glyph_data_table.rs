@@ -115,13 +115,11 @@ impl GlyphDescription {
             let num_instr = reader.read_u16::<BigEndian>()?;
             let mut instr = vec![0u8; num_instr as usize];
             reader.read_exact(instr.as_mut_slice())?;
-            //println!("epocl={},instrl={},gl={}", epoc.len(), instr.len(), glyph_length);
-            let mut data = vec![0u8; glyph_length-(12+epoc.len()*2+instr.len())];
-            //println!("epocl={},instrl={},dl={}", epoc.len(), instr.len(), data.len()); 
+            let mut data = vec![0u8; glyph_length];//-(10+epoc.len()*2+instr.len())]; // TODO: the loader seems to consistantly read more than what would be expected from this buffer, so it reads more than should be necessary to allow that. Questionable indeed.
             reader.read_exact(data.as_mut_slice())?;
             let mut points = Vec::new();
             let mut i: usize = 0; let mut rcsum: usize = 0;
-            let n = (epoc[epoc.len()-1]+1) as usize;
+            let n = (epoc[epoc.len()-1]+1) as usize; //this seems to be a guess found in STB's truetype loader
             while i < data.len() {
                 let d0 = data[i];
                 let flag = GlyphPointFlags::from_bits_truncate(d0);
@@ -137,30 +135,16 @@ impl GlyphDescription {
                         1
                     };
                 rcsum += repeat_count as usize;
-                /*if flag.intersects(GP_RESERVED) {
-                    println!("point [ flags = {:b}/{:?}, repeat count = {} Sum{} ]", d0, flag, repeat_count, rcsum);
-                }*/
                 for ir in 0..repeat_count {
                     points.push(GlyphPoint{on_curve: flag.intersects(GP_OnCurve), x: 0, y: 0, flag: flag });
+                    if points.len() >= n { break; }
                 }
                 if points.len() >= n { break; }
             }
-            println!("found {} points, ifl = {}, d.l = {}", points.len(), i, data.len());
+            println!("found {} points of {}, ifl = {}, d.l = {}, left={}", points.len(), n, i, data.len(), data.len()-i);
             assert!(points.len() < data.len(), "absurd number of points!");
 
             fn load_vec(data: &Vec<u8>, i: &mut usize, last: &mut i16, short_vec: bool, sameorsign: bool) -> i16 {
-                /*if short_vec {
-                    let v = data[*i] as i16;
-                    println!("{}data={:x}", *i, v);
-                    *last = v;
-                    *i += 1; v * (if sameorsign { 1 } else { -1 }) 
-                } else {
-                    if sameorsign { println!("ldata={:x}", *last); return *last; }
-                    let v = (data[*i] as i16) << 8 & (data[*i+1] as i16);
-                    println!("{}data={:b}", *i, v);
-                    *last = v;
-                    *i += 2; v 
-                }*/
                 if short_vec {
                     let v = (data[*i] as i16) * if sameorsign {1} else {-1};
                     *last += v;
@@ -169,20 +153,26 @@ impl GlyphDescription {
                     let v = ((data[*i] as i16) << 8) & (data[*i+1] as i16);
                     *last += v;
                     *i += 2;
-                }
+                    print!("2");
+                } else { print!("!!! "); }
                 println!("i{} v{}", *i, *last); 
                 *last
             }
 
             let mut last: i16 = 0;
             for mut p in &mut points {
+                if p.flag.intersects(GP_Repeat) { print!("REP "); }
                 p.x = load_vec(&data, &mut i, &mut last, p.flag.intersects(GP_XShortVec), p.flag.intersects(GP_XSameOrVecSign));
             }
+            println!("---");
             last = 0;
+            let mut count = 0;
             for mut p in &mut points {
+                if p.flag.intersects(GP_Repeat) { print!("REP "); }
                 p.y = load_vec(&data, &mut i, &mut last, p.flag.intersects(GP_YShortVec), p.flag.intersects(GP_YSameOrVecSign));
+                count+=1;
+                print!("c{} ", count);
             }
-            //assert!(i == data.len() || i == data.len()-1, "should use up all the data");
             Ok(GlyphDescription::Simple {
                 num_contours: num_contours as u16,
                 x_min: x_min,
@@ -221,6 +211,16 @@ impl GlyphDescription {
                 } else {
                     Transformation::Uniform(f2dot14(0b0100_0000_0000_0000))
                 }; 
+
+                //TODO: Apple's manual has some math that seems to generate a matrix. Should that
+                //go here? Transforms are definitly not finsihed out it seem
+                
+                components.push(ComponentGlyphDescription {
+                    glyph_index: ix,
+                    arg1: arg1, arg2: arg2,
+                    transform: tf,
+                    use_metrics: flags.intersects(CGF_USE_METRICS)
+                });
 
                 if flags.intersects(CGF_INSTRUCTIONS_PRESENT) {
                     has_instructions = true;

@@ -7,10 +7,6 @@ use std::fs::File;
 use std::rc::Rc;
 use byteorder::{ByteOrder, BigEndian, ReadBytesExt};
 
-/*
- * TODO: Move some of this code around so it's in more than one file and this is a bigger module
- *       CMAP table code can probably go in it's own file
- */
 
 /* from Microsoft's TrueType spec:
 Data Types
@@ -30,6 +26,7 @@ UFWORD	Unsigned 16-bit integer (USHORT) that describes a quantity in FUnits.
 F2DOT14	16-bit signed fixed number with the low 14 bits of fraction (2.14).
 */
 
+//TODO: Change this so that it just converts to float?
 #[derive(Copy, Clone, Debug)]
 struct fixed {
     int_part: u16,
@@ -40,6 +37,8 @@ impl fixed {
         Ok(fixed{ int_part: r.read_u16::<E>()?, frac_part: r.read_u16::<E>()? })
     }
 }
+
+//TODO: Change this so that it just converts to float, silly fixed point is silly
 #[derive(Copy, Clone, Debug)]
 struct f2dot14(i16);
 
@@ -451,12 +450,12 @@ mod tests {
     }
 
     #[test]
-    fn test_header() {
+    fn test() {
 
         //this needs to be changed to be xplat, probably a font in the repo
         let mut font_file = File::open(
-            //"C:\\Windows\\Fonts\\arial.ttf"
-            "C:\\Windows\\Fonts\\comic.ttf"
+            "C:\\Windows\\Fonts\\arial.ttf"
+            //"C:\\Windows\\Fonts\\comic.ttf"
             //"FantasqueSansMono-Regular.ttf"
             //"uu.ttf"
             //"test.TTF"
