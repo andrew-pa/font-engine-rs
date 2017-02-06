@@ -8,13 +8,13 @@ use super::*;
 
 #[derive(Debug)]
 pub enum Transformation {
-    Uniform(f2dot14),
-    XY(f2dot14, f2dot14),
+    Uniform(F2dot14),
+    XY(F2dot14, F2dot14),
     Mat2x2 {
-        xscale: f2dot14,
-        scale01: f2dot14,
-        scale10: f2dot14,
-        yscale: f2dot14
+        xscale: F2dot14,
+        scale01: F2dot14,
+        scale10: F2dot14,
+        yscale: F2dot14
     }
 }
 
@@ -57,8 +57,8 @@ bitflags! {
 
 #[derive(Debug)]
 pub struct GlyphPoint {
-    on_curve: bool,
-    x: i16, y: i16,
+    pub on_curve: bool,
+    pub x: i16, pub y: i16,
     flag: GlyphPointFlags
 }
 
@@ -85,7 +85,7 @@ impl Debug for GlyphDescription {
         match self {
             &GlyphDescription::None => write!(f, "GlyphDescription::None"),
             &GlyphDescription::Simple { 
-                num_contours: c, x_min: xm, x_max: xx, y_min: ym, y_max: yx,
+                num_contours: _, x_min: _, x_max: _, y_min: _, y_max: _,
                 end_points_of_contours: ref epoc,
                 instructions: ref is,
                 points: ref p
@@ -108,7 +108,7 @@ impl GlyphDescription {
         if glyph_length == 0 { return Ok(GlyphDescription::None); }
         if num_contours > 0 {
             let mut epoc = Vec::new();
-            for i in 0..num_contours {
+            for _ in 0..num_contours {
                 epoc.push(reader.read_u16::<BigEndian>()?);
             }
             println!("end points of contours = {:?}", epoc);
@@ -118,7 +118,7 @@ impl GlyphDescription {
             let mut data = vec![0u8; glyph_length];//-(10+epoc.len()*2+instr.len())]; // TODO: the loader seems to consistantly read more than what would be expected from this buffer, so it reads more than should be necessary to allow that. Questionable indeed.
             reader.read_exact(data.as_mut_slice())?;
             let mut points = Vec::new();
-            let mut i: usize = 0; let mut rcsum: usize = 0;
+            let mut i: usize = 0;
             let n = (epoc[epoc.len()-1]+1) as usize; //this seems to be a guess found in STB's truetype loader
             while i < data.len() {
                 let d0 = data[i];
@@ -134,8 +134,7 @@ impl GlyphDescription {
                     } else {
                         1
                     };
-                rcsum += repeat_count as usize;
-                for ir in 0..repeat_count {
+                for _ in 0..repeat_count {
                     points.push(GlyphPoint{on_curve: flag.intersects(GP_OnCurve), x: 0, y: 0, flag: flag });
                     if points.len() >= n { break; }
                 }
@@ -198,18 +197,18 @@ impl GlyphDescription {
                         (arg12 as u16 >> 8, arg12 as u16 & 0x00ff)
                     };
                 let tf = if flags.intersects(CGF_SIMPLE_SCALE) {
-                    Transformation::Uniform(f2dot14(reader.read_i16::<BigEndian>()?))
+                    Transformation::Uniform(F2dot14(reader.read_i16::<BigEndian>()?))
                 } else if flags.intersects(CGF_XY_SCALE) {
-                    Transformation::XY(f2dot14(reader.read_i16::<BigEndian>()?), f2dot14(reader.read_i16::<BigEndian>()?))
+                    Transformation::XY(F2dot14(reader.read_i16::<BigEndian>()?), F2dot14(reader.read_i16::<BigEndian>()?))
                 } else if flags.intersects(CGF_2X2_TRANSFORM) {
                     Transformation::Mat2x2 {
-                        xscale: f2dot14(reader.read_i16::<BigEndian>()?), 
-                        scale01:f2dot14(reader.read_i16::<BigEndian>()?), 
-                        scale10:f2dot14(reader.read_i16::<BigEndian>()?), 
-                        yscale: f2dot14(reader.read_i16::<BigEndian>()?) 
+                        xscale: F2dot14(reader.read_i16::<BigEndian>()?), 
+                        scale01:F2dot14(reader.read_i16::<BigEndian>()?), 
+                        scale10:F2dot14(reader.read_i16::<BigEndian>()?), 
+                        yscale: F2dot14(reader.read_i16::<BigEndian>()?) 
                     }
                 } else {
-                    Transformation::Uniform(f2dot14(0b0100_0000_0000_0000))
+                    Transformation::Uniform(F2dot14(0b0100_0000_0000_0000))
                 }; 
 
                 //TODO: Apple's manual has some math that seems to generate a matrix. Should that
@@ -248,7 +247,7 @@ impl GlyphDescription {
 // apparently this table is useless
 #[derive(Debug)]
 pub struct GlyphDataTable {
-    glyphs: Vec<GlyphDescription>
+    pub glyphs: Vec<GlyphDescription>
 
 }
 
@@ -260,7 +259,7 @@ impl Table for GlyphDataTable {
 impl GlyphDataTable {
     /// This function reads a 'glyf' table from a file, assymbling the glyphs togther as it goes
     /// using data from the 'loca' table
-    pub fn from_binary<R: Read+Seek>(reader: &mut R, table_start: u64, maxp_table: MaxProfileTable, loca_table: Rc<LocationTable>) -> io::Result<GlyphDataTable> {
+    pub fn from_binary<R: Read+Seek>(reader: &mut R, table_start: u64, maxp_table: MaxProfileTable, loca_table: &LocationTable) -> io::Result<GlyphDataTable> {
         let mut glyphs = Vec::new();
         for glyph_ix in loca_table.offsets.windows(2) {
             //println!("glyph_ix = {:?}", glyph_ix);

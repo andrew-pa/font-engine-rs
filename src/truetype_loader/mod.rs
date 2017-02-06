@@ -1,9 +1,11 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(non_upper_case_globals)]
 use std::io;
 use std::io::prelude::*;
 use std::fmt;
 use std::fmt::{Debug};
 use std::mem;
-use std::fs::File;
 use std::rc::Rc;
 use byteorder::{ByteOrder, BigEndian, ReadBytesExt};
 
@@ -28,19 +30,19 @@ F2DOT14	16-bit signed fixed number with the low 14 bits of fraction (2.14).
 
 //TODO: Change this so that it just converts to float?
 #[derive(Copy, Clone, Debug)]
-struct fixed {
+pub struct Fixed {
     int_part: u16,
     frac_part: u16
 }
-impl fixed {
-    fn from_binary<R: Read + Seek, E: ByteOrder>(r: &mut R) -> io::Result<fixed> {
-        Ok(fixed{ int_part: r.read_u16::<E>()?, frac_part: r.read_u16::<E>()? })
+impl Fixed {
+    pub fn from_binary<R: Read + Seek, E: ByteOrder>(r: &mut R) -> io::Result<Fixed> {
+        Ok(Fixed{ int_part: r.read_u16::<E>()?, frac_part: r.read_u16::<E>()? })
     }
 }
 
 //TODO: Change this so that it just converts to float, silly fixed point is silly
 #[derive(Copy, Clone, Debug)]
-struct f2dot14(i16);
+pub struct F2dot14(i16);
 
 macro_rules! table_tag_code {
     ($a:expr, $b:expr, $c:expr, $d:expr) => (($a as u32) << 24 | ($b as u32) << 16 | ($c as u32) << 8 | ($d as u32));
@@ -118,15 +120,15 @@ impl Debug for FontProgram {
 
 bitflags! {
     flags GASPBehavior: u16 {
-        const GASP_Neither = 0x0000u16,
-        const GASP_GridFit = 0x1000u16,    //these are tricky because it's in big endian format
-        const GASP_Grayscale = 0x2000u16,
+        const GASP_NEITHER = 0x0000u16,
+        const GASP_GRIDFIT = 0x1000u16,    //these are tricky because it's in big endian format
+        const GASP_GRAYSCALE = 0x2000u16,
     }
 }
 
 #[derive(Copy, Clone, Debug)]
 struct GASPRange {
-    range_max_PPEM: u16,
+    range_max_ppem: u16,
     range_gasp_behavior: u16
 }
 
@@ -145,11 +147,11 @@ impl GASPTable {
         let ver = reader.read_u16::<BigEndian>()?;
         let num_ranges = reader.read_u16::<BigEndian>()?;
         let mut r = Vec::new();
-        for i in 0..num_ranges {
+        for _ in 0..num_ranges {
             let gb = reader.read_u16::<BigEndian>()?;
-            println!("GASP bits {:b}b ; {:b}b", gb, GASP_GridFit.bits());
+            println!("GASP bits {:b}b ; {:b}b", gb, GASP_GRIDFIT.bits());
             r.push(GASPRange {
-                range_max_PPEM: reader.read_u16::<BigEndian>()?,
+                range_max_ppem: reader.read_u16::<BigEndian>()?,
                 range_gasp_behavior: /*match GASPBehavior::from_bits(gb) {
                     Some(v) => v,
                     None => return Err(io::Error::new(io::ErrorKind::Other, "Unknown GASP behavior bits"))
@@ -189,7 +191,7 @@ impl HorizDeviceMetricsTable {
         let num_dr = reader.read_i16::<BigEndian>()?;
         let size_dr = reader.read_i32::<BigEndian>()?;
         let mut r = Vec::new();
-        for i in 0..num_dr {
+        for _ in 0..num_dr {
             let ps = reader.read_u8()?;
             let mw = reader.read_u8()?;
             let mut w = vec![0u8; num_glyphs];
@@ -197,9 +199,9 @@ impl HorizDeviceMetricsTable {
             r.push(DeviceRecord::Format0 {
                 pixel_size: ps,
                 max_width: mw,
-                widths: w 
+                widths: w
             }); // this requires knowing numGlyphs from the maxp table
-            reader.seek(io::SeekFrom::Current(size_dr as i64));
+            reader.seek(io::SeekFrom::Current(size_dr as i64))?;
         }
         Ok(HorizDeviceMetricsTable {
             version: v,
@@ -214,8 +216,8 @@ impl Table for HorizDeviceMetricsTable {
 
 #[derive(Copy, Clone, Debug)]
 struct FontHeader {
-    version: fixed,
-    font_rev: fixed,
+    version: Fixed,
+    font_rev: Fixed,
     checksum: u32,
     flags: u16,
     units_per_em: u16,
@@ -235,8 +237,8 @@ struct FontHeader {
 impl FontHeader {
     fn from_binary<R: Read + Seek>(reader: &mut R) -> io::Result<FontHeader> {
         Ok(FontHeader {
-            version: fixed::from_binary::<R,BigEndian>(reader)?,
-            font_rev: fixed::from_binary::<R,BigEndian>(reader)?,
+            version: Fixed::from_binary::<R,BigEndian>(reader)?,
+            font_rev: Fixed::from_binary::<R,BigEndian>(reader)?,
             checksum: reader.read_u32::<BigEndian>()?,
             flags: { assert_eq!(reader.read_u32::<BigEndian>()?, 0x5f0f3cf5, "invalid magic"); reader.read_u16::<BigEndian>()? },
             units_per_em: reader.read_u16::<BigEndian>()?,
@@ -261,7 +263,7 @@ impl Table for FontHeader {
 
 #[derive(Copy,Clone,Debug)]
 pub struct MaxProfileTable {
-    version: fixed,
+    version: Fixed,
     num_glyphs: u16,
     num_points: u16,
     max_contours: u16,
@@ -285,7 +287,7 @@ impl Table for MaxProfileTable {
 impl MaxProfileTable {
     fn from_binary<R: Read + Seek>(reader: &mut R) -> io::Result<MaxProfileTable> {
         Ok(MaxProfileTable {
-            version: fixed::from_binary::<R,BigEndian>(reader)?,
+            version: Fixed::from_binary::<R,BigEndian>(reader)?,
             num_glyphs: reader.read_u16::<BigEndian>()?,
             num_points: reader.read_u16::<BigEndian>()?,
             max_contours: reader.read_u16::<BigEndian>()?,
@@ -324,8 +326,8 @@ impl LocationTable {
         Ok(LocationTable {
             offsets: {
                 let mut v = Vec::new();
-                for i in 0..(num_glyphs+1) {
-                    v.push(if format == 1 { reader.read_u32::<BigEndian>()? } else { reader.read_u16::<BigEndian>()? as u32 *2 }) 
+                for _ in 0..(num_glyphs+1) {
+                    v.push(if format == 1 { reader.read_u32::<BigEndian>()? } else { reader.read_u16::<BigEndian>()? as u32 *2 })
                 }
                 v
             }
@@ -352,24 +354,32 @@ impl TableDirectoryEntry {
 
 #[repr(C)]
 #[derive(Debug)]
-struct OffsetTable {
-    sfnt_version: fixed,
+struct SfntFont {
+    sfnt_version: Fixed,
     search_range: u16,
     entry_selector: u16,
     range_shift: u16,
     table_directory: Vec<TableDirectoryEntry>,
-    tables: Vec<Rc<Table>>
+    cmap_table: Option<CharGlyphMappingTable>,
+    cval_table: Option<ControlValueTable>,
+    fprg_table: Option<FontProgram>,
+    gasp_table: Option<GASPTable>,
+    glyf_table: Option<GlyphDataTable>,
+    loca_table: Option<LocationTable>,
+    hdmx_table: Option<HorizDeviceMetricsTable>,
+    head_table: Option<FontHeader>,
+    maxp_table: Option<MaxProfileTable>
 }
 
-impl OffsetTable {
-    fn from_binary<R: Read + Seek>(reader : &mut R) -> io::Result<OffsetTable> {
-        let version = fixed::from_binary::<R,BigEndian>(reader)?;
+impl SfntFont {
+    fn from_binary<R: Read + Seek>(reader : &mut R) -> io::Result<SfntFont> {
+        let version = Fixed::from_binary::<R,BigEndian>(reader)?;
         let num_tables = reader.read_u16::<BigEndian>()?;
         let search_range = reader.read_u16::<BigEndian>()?;
         let entry_sel = reader.read_u16::<BigEndian>()?;
         let range_shift = reader.read_u16::<BigEndian>()?;
         let mut table_directory = Vec::new();
-        for i in 0..num_tables {
+        for _ in 0..num_tables {
             let tbe = TableDirectoryEntry::from_binary(reader)?;
             match tbe.tag {
                 TableTag::MaxProfile => table_directory.insert(0, tbe),
@@ -379,69 +389,76 @@ impl OffsetTable {
             }
         }
         println!("table directory: {:?}", table_directory);
-        let mut tables = Vec::<Rc<Table>>::new();
-        let mut maxp_table : Option<MaxProfileTable> = None;
-        let mut head_table : Option<FontHeader> = None;
-        let mut loca_table : Option<Rc<LocationTable>> = None;
-        for tde in &table_directory {
-            reader.seek(io::SeekFrom::Start(tde.offset as u64));
-            tables.push(match tde.tag {
-                TableTag::CharGlyphMapping =>
-                   Rc::new(char_glyph_mapping_table::CharGlyphMappingTable::from_binary(reader, tde.offset as u64)?),
-                TableTag::ControlValue => {
-                    let mut tbl = Vec::with_capacity((tde.length/2) as usize);
-                    for i in 0..tde.length {
-                        tbl.push(reader.read_i16::<BigEndian>()?);
-                    }
-                    Rc::new(ControlValueTable(tbl))
-                },
-                TableTag::FontProgram => {
-                    let mut tbl = vec![0u8; tde.length as usize];
-                    reader.read_exact(tbl.as_mut_slice())?;
-                    Rc::new(FontProgram(tbl))
-                },
-                TableTag::GridFitAndScanConvertProc => 
-                    Rc::new(GASPTable::from_binary(reader)?),
-                TableTag::GlyphData =>
-                    Rc::new(GlyphDataTable::from_binary(reader, tde.offset as u64, 
-                                    maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before glyf table!"))?,
-                                    loca_table.clone().ok_or(io::Error::new(io::ErrorKind::Other, "Must load loca table before glyf table!"))?)?),
-                TableTag::LocationIndex => {
-                    loca_table = Some(Rc::new(LocationTable::from_binary(reader, 
-                                    maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before loca table!"))?.num_glyphs as usize,
-                                    head_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load head table before loca table!"))?.index_to_locformat)?));
-                    loca_table.clone().unwrap()
-                },
-                TableTag::HorizDevMetric =>
-                    Rc::new(HorizDeviceMetricsTable::from_binary(reader, 
-                                    maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before hdmx table!"))?.num_glyphs as usize)?),
-                TableTag::FontHeader => 
-                    Rc::new({ let v = FontHeader::from_binary(reader)?; println!("got head table = {:?}", v); head_table = Some(v); v }),
-                TableTag::MaxProfile => {
-                    let mpt = MaxProfileTable::from_binary(reader)?; 
-                    maxp_table = Some(mpt);
-                    println!("got maxp table = {:?}", mpt);
-                    Rc::new(mpt)
-                }
-                _ =>  { println!("Unknown table tag: {:?}!", tde.tag); continue; }
-            })
-        }
-        Ok(OffsetTable {
+        let mut fnt = SfntFont {
             sfnt_version: version,
             search_range: search_range,
             entry_selector: entry_sel,
             range_shift: range_shift,
             table_directory: table_directory,
-            tables: tables
-        })
+            cmap_table: None,
+            cval_table: None,
+            fprg_table: None,
+            gasp_table: None,
+            glyf_table: None,
+            loca_table: None,
+            hdmx_table: None,
+            head_table: None,
+            maxp_table: None,
+        };
+        for tde in &fnt.table_directory {
+            reader.seek(io::SeekFrom::Start(tde.offset as u64))?;
+            match tde.tag {
+                TableTag::CharGlyphMapping =>
+                   fnt.cmap_table = Some(char_glyph_mapping_table::CharGlyphMappingTable::from_binary(reader, tde.offset as u64)?),
+                TableTag::ControlValue => {
+                    let mut tbl = Vec::with_capacity((tde.length/2) as usize);
+                    for _ in 0..tde.length {
+                        tbl.push(reader.read_i16::<BigEndian>()?);
+                    }
+                    fnt.cval_table = Some(ControlValueTable(tbl))
+                },
+                TableTag::FontProgram => {
+                    let mut tbl = vec![0u8; tde.length as usize];
+                    reader.read_exact(tbl.as_mut_slice())?;
+                    fnt.fprg_table = Some(FontProgram(tbl))
+                },
+                TableTag::GridFitAndScanConvertProc =>
+                    fnt.gasp_table = Some(GASPTable::from_binary(reader)?),
+                TableTag::GlyphData =>
+                    fnt.glyf_table = Some(GlyphDataTable::from_binary(reader, tde.offset as u64,
+                                    fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before glyf table!"))?,
+                                    fnt.loca_table.as_ref().ok_or(io::Error::new(io::ErrorKind::Other, "Must load loca table before glyf table!"))? )?),
+                TableTag::LocationIndex => {
+                    fnt.loca_table = Some(LocationTable::from_binary(reader,
+                                    fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before loca table!"))?.num_glyphs as usize,
+                                    fnt.head_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load head table before loca table!"))?.index_to_locformat)?);
+                },
+                TableTag::HorizDevMetric =>
+                    fnt.hdmx_table = Some(HorizDeviceMetricsTable::from_binary(reader,
+                                    fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before hdmx table!"))?.num_glyphs as usize)?),
+                TableTag::FontHeader =>
+                    fnt.head_table = Some({ let v = FontHeader::from_binary(reader)?; println!("got head table = {:?}", v); v } ),
+                TableTag::MaxProfile => {
+                    fnt.maxp_table = Some(MaxProfileTable::from_binary(reader)?);
+                    println!("got maxp table = {:?}", fnt.maxp_table);
+                }
+                _ =>  { println!("Unknown table tag: {:?}!", tde.tag); continue; }
+            }
+        }
+        Ok(fnt)
     }
 }
 
 fn calculate_table_checksum() -> u32 { 0 }
 
 #[cfg(test)]
+extern crate svg;
+
+#[cfg(test)]
 mod tests {
+
     use super::*;
+    use std::fs::File;
 
     #[test]
     fn test_tabletag() {
@@ -450,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn test() {
+    fn test_loader() {
 
         //this needs to be changed to be xplat, probably a font in the repo
         let mut font_file = File::open(
@@ -461,8 +478,74 @@ mod tests {
             //"test.TTF"
             ).unwrap();
 
-        let otbl = OffsetTable::from_binary(&mut font_file).unwrap();
-        println!("OffsetTable = {:?}", otbl);
+        let f = SfntFont::from_binary(&mut font_file).unwrap();
+        println!("SfntFont = {:?}", f);
+    }
+
+    #[test]
+    fn test_glyph_load_exp_svg() {
+        use self::svg::Document;
+        use self::svg::Node;
+        use self::svg::node::element::{Path, Rectangle, Circle, Group};
+        use self::svg::node::element::path::{Data};
+
+        let mut font_file = File::open("C:\\Windows\\Fonts\\arial.ttf").unwrap();
+        let font = SfntFont::from_binary(&mut font_file).unwrap();
+
+        /*let GlyphDescription::Simple { 
+            num_contours: _, x_max: x_max, x_min: x_min, y_max: y_max, y_min: y_min,
+            end_points_of_contours: epoc, instructions: instr,
+            points: pnts 
+        } = font.glyf_table.unwrap().glyphs[20];*/
+        
+        let mut doc = Document::new();
+        let mut gx = 0; let mut gy = 0; let mut limit = 0;
+        for g in &font.glyf_table.unwrap().glyphs {
+            if limit > 200 { break; } 
+        match g {
+            &GlyphDescription::Simple { 
+                num_contours: _, x_max, x_min, y_max, y_min,
+                end_points_of_contours: ref epoc, instructions: ref instr,
+                points: ref points 
+            } => {
+                let mut g = Group::new();
+                g.append(Rectangle::new().set("x",x_min).set("y",y_min).set("width",x_max-x_min).set("height",y_max-y_min).set("fill","none").set("stroke","black"));
+                for p in points {
+                    g.append(Circle::new().set("cx",p.x).set("cy",p.y).set("r",6).set("fill",
+                                                                                        if p.on_curve { "black" } else { "red" }));
+                }
+                let mut curve = Data::new();
+                let mut i = 0;
+                while !points[i].on_curve { i += 1 }
+                curve = curve.move_to((points[i].x, points[i].y)); i+=1;
+                while i < points.len()-1 {
+                    if points[i].on_curve { 
+                        curve = curve.line_to((points[i].x,points[i].y)); 
+                        i += 1;
+                    } else {
+                        curve = curve.quadratic_curve_to((points[i].x,points[i].y, points[i+1].x,points[i+1].y));
+                        i += 2;
+                        //assert!(points[(i+1)%points.len()].on_curve);
+//                        curve = curve.cubic_curve_by((points[i].x,points[i].y, points[(i+2) % points.len()].x,points[(i+2) % points.len()].y,points[(i+1)%points.len()].x,points[(i+1)%points.len()].y));
+ //                       i += 3;
+                    }
+
+                }
+                g.append(Path::new().set("fill","none").set("stroke","blue").set("stroke-width",4).set("d",curve.close()));
+                doc.append(g.set("transform", format!("translate({} {})", gx, gy)));
+                gx += (x_max-x_min)*2;
+                if gx > 30000 {
+                    gx = 0;
+                    gy += 3000;
+                }limit+=1;
+            },
+            _ => println!("compound glyph!")
+        }
+        }
+
+        doc.assign("viewBox", (0, -500, gx+3000, gy+3000));
+
+        svg::save("glyph_load_test.svg", &doc).unwrap();
     }
 }
 

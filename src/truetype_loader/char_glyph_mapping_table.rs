@@ -77,11 +77,11 @@ impl CharGlyphMappingTable {
         println!("cmap table ver={}, num_tables={}", table_version, num_encoding_tables);
         let mut encoding_tables = Vec::new();
         for i in 0..num_encoding_tables {
-            reader.seek(io::SeekFrom::Start(table_offset + 4 + (8*i) as u64));
+            reader.seek(io::SeekFrom::Start(table_offset + 4 + (8*i) as u64))?;
             let plat_id = reader.read_u16::<BigEndian>()?;
             let plat_encode_id = reader.read_u16::<BigEndian>()?;
             let offset = reader.read_u32::<BigEndian>()?;
-            reader.seek(io::SeekFrom::Start(offset as u64 + table_offset));
+            reader.seek(io::SeekFrom::Start(offset as u64 + table_offset))?;
             let format = reader.read_u16::<BigEndian>()?;
             let length = reader.read_u16::<BigEndian>()?;
             let ver = reader.read_u16::<BigEndian>()?;
@@ -109,25 +109,25 @@ impl CharGlyphMappingTable {
                             let entry_selector = reader.read_u16::<BigEndian>()?;
                             let range_shift = reader.read_u16::<BigEndian>()?;
                             let mut end_count = Vec::with_capacity(segcount);
-                            for i in 0..segcount {
+                            for _ in 0..segcount {
                                 end_count.push(reader.read_u16::<BigEndian>()?);
                             }
                             reader.read_u16::<BigEndian>()?; //skip reserved padding u16
                             let mut start_count = Vec::with_capacity(segcount);
-                            for i in 0..segcount {
+                            for _ in 0..segcount {
                                 start_count.push(reader.read_u16::<BigEndian>()?);
                             }
                             let mut id_delta = Vec::with_capacity(segcount);
-                            for i in 0..segcount {
+                            for _ in 0..segcount {
                                 id_delta.push(reader.read_u16::<BigEndian>()?);
                             }
                             let mut id_range_offset = Vec::with_capacity(segcount);
-                            for i in 0..segcount {
+                            for _ in 0..segcount {
                                 id_range_offset.push(reader.read_u16::<BigEndian>()?);
                             }
                             let glyph_indices_count = (length as usize - (2 * (8 + 4*segcount))) / 2;
                             let mut glyph_indices = Vec::with_capacity(glyph_indices_count);
-                            for i in 0..glyph_indices_count {
+                            for _ in 0..glyph_indices_count {
                                 glyph_indices.push(reader.read_u16::<BigEndian>()?);
                             }
                             CharGlyphMappingEncodingTableFormat::SegmentMapToDelta {
@@ -147,7 +147,7 @@ impl CharGlyphMappingTable {
                             let first_code = reader.read_u16::<BigEndian>()?;
                             let entry_count = reader.read_u16::<BigEndian>()?;
                             let mut glyph_indices = Vec::with_capacity(entry_count as usize);
-                            for i in 0..entry_count {
+                            for _ in 0..entry_count {
                                 glyph_indices.push(reader.read_u16::<BigEndian>()?);
                             }
                             CharGlyphMappingEncodingTableFormat::Trimmed {
