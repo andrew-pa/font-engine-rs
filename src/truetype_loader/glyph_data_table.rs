@@ -55,10 +55,10 @@ bitflags! {
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct GlyphPoint {
     pub on_curve: bool,
-    pub x: i16, pub y: i16,
+    pub x: i32, pub y: i32,
     flag: GlyphPointFlags
 }
 
@@ -143,14 +143,14 @@ impl GlyphDescription {
             println!("found {} points of {}, ifl = {}, d.l = {}, left={}", points.len(), n, i, data.len(), data.len()-i);
             assert!(points.len() < data.len(), "absurd number of points!");
 
-            fn load_vec(data: &Vec<u8>, i: &mut usize, last: &mut i16, short_vec: bool, sameorsign: bool) -> i16 {
+            fn load_vec(data: &Vec<u8>, i: &mut usize, last: &mut i32, short_vec: bool, sameorsign: bool) -> i32 {
                 if short_vec {
-                    let v = (data[*i] as i16) * if sameorsign {1} else {-1};
+                    let v = (data[*i] as i32) * if sameorsign {1} else {-1};
                     *last += v;
                     *i += 1;
                 } else if !sameorsign {
-                    let v = ((data[*i] as i16) << 8) & (data[*i+1] as i16);
-                    *last += v;
+                    let v = (data[*i] as u16)*256 + data[(*i) + 1] as u16;
+                    *last = last.wrapping_add((v as i16) as i32);
                     *i += 2;
                     print!("2");
                 } else { print!("!!! "); }
@@ -158,7 +158,7 @@ impl GlyphDescription {
                 *last
             }
 
-            let mut last: i16 = 0;
+            let mut last: i32 = 0;
             for mut p in &mut points {
                 if p.flag.intersects(GP_Repeat) { print!("REP "); }
                 p.x = load_vec(&data, &mut i, &mut last, p.flag.intersects(GP_XShortVec), p.flag.intersects(GP_XSameOrVecSign));

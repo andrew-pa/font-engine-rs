@@ -63,7 +63,6 @@ struct CharGlyphMappingEncodingTable {
     subtable: CharGlyphMappingEncodingTableFormat
 }
 
-#[repr(C)]
 #[derive(Debug)]
 pub struct CharGlyphMappingTable {
     table_version: u16,

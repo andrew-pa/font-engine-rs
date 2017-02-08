@@ -489,7 +489,7 @@ mod tests {
         use self::svg::node::element::{Path, Rectangle, Circle, Group};
         use self::svg::node::element::path::{Data};
 
-        let mut font_file = File::open("C:\\Windows\\Fonts\\arial.ttf").unwrap();
+        let mut font_file = File::open("C:\\Windows\\Fonts\\comic.ttf").unwrap();
         let font = SfntFont::from_binary(&mut font_file).unwrap();
 
         /*let GlyphDescription::Simple { 
@@ -497,11 +497,45 @@ mod tests {
             end_points_of_contours: epoc, instructions: instr,
             points: pnts 
         } = font.glyf_table.unwrap().glyphs[20];*/
+
+        fn generate_contour(points: &Vec<GlyphPoint>, start: usize, end: usize) -> Data {
+            let mut curve = Data::new();
+            let mut i = start;
+            while !points[i].on_curve { i += 1 }
+            curve = curve.move_to((points[i].x, points[i].y)); i+=1;
+            while i < end {
+                if points[i].on_curve { 
+                    curve = curve.line_to((points[i].x,points[i].y)); 
+                    i += 1;
+                } else {
+                    let mut a = points[i];
+                    i+=1;
+                    let mut b = points[i%points.len()];
+                    if b.on_curve {
+                        curve = curve.quadratic_curve_to((a.x, a.y, b.x, b.y));
+                    }
+                    else {
+                        while !b.on_curve {
+                            let midx = (a.x + b.x) / 2;
+                            let midy = (a.y + b.y) / 2;
+                            curve = curve.quadratic_curve_to((a.x, a.y, midx, midy));
+                            a = b;
+                            i += 1;
+                            b = points[i%points.len()];
+                        } 
+                        //assert!(a.on_curve);
+                        curve = curve.quadratic_curve_to((a.x, a.y, b.x, b.y));
+                    }
+                    
+                }
+            }
+            curve.close()
+        }
         
         let mut doc = Document::new();
-        let mut gx = 0; let mut gy = 0; let mut limit = 0;
+        let mut gx : u64 = 0; let mut gy : u64 = 0; let mut limit = 0;
         for g in &font.glyf_table.unwrap().glyphs {
-            if limit > 200 { break; } 
+            if limit > 64 { break; } 
         match g {
             &GlyphDescription::Simple { 
                 num_contours: _, x_max, x_min, y_max, y_min,
@@ -509,41 +543,30 @@ mod tests {
                 points: ref points 
             } => {
                 let mut g = Group::new();
-                g.append(Rectangle::new().set("x",x_min).set("y",y_min).set("width",x_max-x_min).set("height",y_max-y_min).set("fill","none").set("stroke","black"));
+                g.append(Rectangle::new().set("x",x_min).set("y",y_min).set("width",x_max-x_min).set("height",y_max-y_min).set("fill","none").set("stroke","black").set("stroke-width",6));
                 for p in points {
                     g.append(Circle::new().set("cx",p.x).set("cy",p.y).set("r",6).set("fill",
                                                                                         if p.on_curve { "black" } else { "red" }));
                 }
-                let mut curve = Data::new();
-                let mut i = 0;
-                while !points[i].on_curve { i += 1 }
-                curve = curve.move_to((points[i].x, points[i].y)); i+=1;
-                while i < points.len()-1 {
-                    if points[i].on_curve { 
-                        curve = curve.line_to((points[i].x,points[i].y)); 
-                        i += 1;
-                    } else {
-                        curve = curve.quadratic_curve_to((points[i].x,points[i].y, points[i+1].x,points[i+1].y));
-                        i += 2;
-                        //assert!(points[(i+1)%points.len()].on_curve);
-//                        curve = curve.cubic_curve_by((points[i].x,points[i].y, points[(i+2) % points.len()].x,points[(i+2) % points.len()].y,points[(i+1)%points.len()].x,points[(i+1)%points.len()].y));
- //                       i += 3;
-                    }
-
+                let mut last_ep = 0;
+                for &ep in epoc {
+                    g.append(Path::new().set("fill","none")
+                             .set("stroke","blue").set("stroke-width",6)
+                             .set("d",generate_contour(&points, last_ep, ep as usize)));
+                    last_ep = ep as usize;
                 }
-                g.append(Path::new().set("fill","none").set("stroke","blue").set("stroke-width",4).set("d",curve.close()));
                 doc.append(g.set("transform", format!("translate({} {})", gx, gy)));
-                gx += (x_max-x_min)*2;
+                gx += ((x_max-x_min)*2) as u64;
                 if gx > 30000 {
                     gx = 0;
-                    gy += 3000;
+                    gy += ((y_max-y_min)*2) as u64;
                 }limit+=1;
             },
             _ => println!("compound glyph!")
         }
         }
 
-        doc.assign("viewBox", (0, -500, gx+3000, gy+3000));
+        doc.assign("viewBox", (0, -500, 32000, gy+3000));
 
         svg::save("glyph_load_test.svg", &doc).unwrap();
     }
