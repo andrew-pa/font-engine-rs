@@ -486,7 +486,7 @@ mod tests {
     fn test_glyph_load_exp_svg() {
         use self::svg::Document;
         use self::svg::Node;
-        use self::svg::node::element::{Path, Rectangle, Circle, Group};
+        use self::svg::node::element::{Text, Path, Rectangle, Circle, Group};
         use self::svg::node::element::path::{Data};
 
         let mut font_file = File::open("C:\\Windows\\Fonts\\comic.ttf").unwrap();
@@ -497,6 +497,15 @@ mod tests {
             end_points_of_contours: epoc, instructions: instr,
             points: pnts 
         } = font.glyf_table.unwrap().glyphs[20];*/
+
+        fn wrap(i: usize, start: usize, end: usize) -> usize {
+            let len = (end-start);
+            if i >= end {
+                start + ((i-start) % len)
+            } else if i < start {
+                start + ((start-i) % len)
+            } else { i }
+        }
 
         fn generate_contour(points: &Vec<GlyphPoint>, start: usize, end: usize) -> Data {
             let mut curve = Data::new();
@@ -510,7 +519,7 @@ mod tests {
                 } else {
                     let mut a = points[i];
                     i+=1;
-                    let mut b = points[i%points.len()];
+                    let mut b = points[wrap(i, start, end)];
                     if b.on_curve {
                         curve = curve.quadratic_curve_to((a.x, a.y, b.x, b.y));
                     }
@@ -521,7 +530,7 @@ mod tests {
                             curve = curve.quadratic_curve_to((a.x, a.y, midx, midy));
                             a = b;
                             i += 1;
-                            b = points[i%points.len()];
+                            b = points[wrap(i, start, end)];
                         } 
                         //assert!(a.on_curve);
                         curve = curve.quadratic_curve_to((a.x, a.y, b.x, b.y));
@@ -529,7 +538,7 @@ mod tests {
                     
                 }
             }
-            curve.close()
+            curve
         }
         
         let mut doc = Document::new();
@@ -544,15 +553,16 @@ mod tests {
             } => {
                 let mut g = Group::new();
                 g.append(Rectangle::new().set("x",x_min).set("y",y_min).set("width",x_max-x_min).set("height",y_max-y_min).set("fill","none").set("stroke","black").set("stroke-width",6));
-                for p in points {
+                for (i,p) in points.iter().enumerate() {
                     g.append(Circle::new().set("cx",p.x).set("cy",p.y).set("r",6).set("fill",
                                                                                         if p.on_curve { "black" } else { "red" }));
+                    g.append(Text::new().set("x",p.x+10).set("y",p.y+10).add(svg::node::Text::new(format!("{}",i))));
                 }
                 let mut last_ep = 0;
                 for &ep in epoc {
                     g.append(Path::new().set("fill","none")
                              .set("stroke","blue").set("stroke-width",6)
-                             .set("d",generate_contour(&points, last_ep, ep as usize)));
+                             .set("d",generate_contour(&points, last_ep, ep as usize + 1)));
                     last_ep = ep as usize;
                 }
                 doc.append(g.set("transform", format!("translate({} {})", gx, gy)));
