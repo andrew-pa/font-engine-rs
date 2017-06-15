@@ -449,8 +449,6 @@ impl SfntFont {
     }
 }
 
-fn calculate_table_checksum() -> u32 { 0 }
-
 #[cfg(test)]
 extern crate svg;
 
@@ -489,7 +487,7 @@ mod tests {
         use self::svg::node::element::{Text, Path, Rectangle, Circle, Group};
         use self::svg::node::element::path::{Data};
 
-        let mut font_file = File::open("C:\\Windows\\Fonts\\comic.ttf").unwrap();
+        let mut font_file = File::open("C:\\Windows\\Fonts\\arial.ttf").unwrap();
         let font = SfntFont::from_binary(&mut font_file).unwrap();
 
         /*let GlyphDescription::Simple { 
@@ -538,13 +536,13 @@ mod tests {
                     
                 }
             }
-            curve
+            curve.close()
         }
         
         let mut doc = Document::new();
         let mut gx : u64 = 0; let mut gy : u64 = 0; let mut limit = 0;
         for g in &font.glyf_table.unwrap().glyphs {
-            if limit > 64 { break; } 
+            if limit > 512 { break; } 
         match g {
             &GlyphDescription::Simple { 
                 num_contours: _, x_max, x_min, y_max, y_min,
@@ -563,13 +561,13 @@ mod tests {
                     g.append(Path::new().set("fill","none")
                              .set("stroke","blue").set("stroke-width",6)
                              .set("d",generate_contour(&points, last_ep, ep as usize + 1)));
-                    last_ep = ep as usize;
+                    last_ep = ep as usize + 1;
                 }
                 doc.append(g.set("transform", format!("translate({} {})", gx, gy)));
                 gx += ((x_max-x_min)*2) as u64;
                 if gx > 30000 {
                     gx = 0;
-                    gy += ((y_max-y_min)*2) as u64;
+                    gy += 3000;
                 }limit+=1;
             },
             _ => println!("compound glyph!")

@@ -123,14 +123,14 @@ impl GlyphDescription {
             while i < data.len() {
                 let d0 = data[i];
                 let flag = GlyphPointFlags::from_bits_truncate(d0);
-                println!("point [ flags = {:b}/{:?} ]", d0, flag);
+                println!("{} point [ flags = {:b}/{:?} ]", points.len(), d0, flag);
                 i += 1;
                 let repeat_count = 
                     if flag.intersects(GP_Repeat) {
                         let v = data[i];
                         println!("repeat = {}", v);
                         i += 1;
-                        v
+                        v + 1
                     } else {
                         1
                     };
@@ -151,6 +151,7 @@ impl GlyphDescription {
                 } else if !sameorsign {
                     let v = (data[*i] as u16)*256 + data[(*i) + 1] as u16;
                     *last = last.wrapping_add((v as i16) as i32);
+                    assert!(last.abs() < 30000);
                     *i += 2;
                     print!("2");
                 } else { print!("!!! "); }
