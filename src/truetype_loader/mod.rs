@@ -471,7 +471,8 @@ mod tests {
 
         //this needs to be changed to be xplat, probably a font in the repo
         let mut font_file = File::open(
-            "C:\\Windows\\Fonts\\arial.ttf"
+            "/Library/Fonts/Arial.ttf"
+            //"C:\\Windows\\Fonts\\arial.ttf"
             //"C:\\Windows\\Fonts\\comic.ttf"
             //"FantasqueSansMono-Regular.ttf"
             //"uu.ttf"
@@ -489,7 +490,10 @@ mod tests {
         use self::svg::node::element::{Text, Path, Rectangle, Circle, Group};
         use self::svg::node::element::path::{Data};
 
-        let mut font_file = File::open("C:\\Windows\\Fonts\\comic.ttf").unwrap();
+        let mut font_file = File::open(
+            "/Library/Fonts/Arial.ttf"
+            //"C:\\Windows\\Fonts\\comic.ttf"
+            ).unwrap();
         let font = SfntFont::from_binary(&mut font_file).unwrap();
 
         /*let GlyphDescription::Simple { 
@@ -542,38 +546,37 @@ mod tests {
         }
         
         let mut doc = Document::new();
-        let mut gx : u64 = 0; let mut gy : u64 = 0; let mut limit = 0;
-        for g in &font.glyf_table.unwrap().glyphs {
-            if limit > 64 { break; } 
-        match g {
-            &GlyphDescription::Simple { 
-                num_contours: _, x_max, x_min, y_max, y_min,
-                end_points_of_contours: ref epoc, instructions: ref instr,
-                points: ref points 
-            } => {
-                let mut g = Group::new();
-                g.append(Rectangle::new().set("x",x_min).set("y",y_min).set("width",x_max-x_min).set("height",y_max-y_min).set("fill","none").set("stroke","black").set("stroke-width",6));
-                for (i,p) in points.iter().enumerate() {
-                    g.append(Circle::new().set("cx",p.x).set("cy",p.y).set("r",6).set("fill",
-                                                                                        if p.on_curve { "black" } else { "red" }));
-                    g.append(Text::new().set("x",p.x+10).set("y",p.y+10).add(svg::node::Text::new(format!("{}",i))));
-                }
-                let mut last_ep = 0;
-                for &ep in epoc {
-                    g.append(Path::new().set("fill","none")
-                             .set("stroke","blue").set("stroke-width",6)
-                             .set("d",generate_contour(&points, last_ep, ep as usize + 1)));
-                    last_ep = ep as usize;
-                }
-                doc.append(g.set("transform", format!("translate({} {})", gx, gy)));
-                gx += ((x_max-x_min)*2) as u64;
-                if gx > 30000 {
-                    gx = 0;
-                    gy += ((y_max-y_min)*2) as u64;
-                }limit+=1;
-            },
-            _ => println!("compound glyph!")
-        }
+        let mut gx : u64 = 0; let mut gy : u64 = 0;
+        for g in font.glyf_table.unwrap().glyphs.iter().take(128) {
+            match g {
+                &GlyphDescription::Simple { 
+                    num_contours: _, x_max, x_min, y_max, y_min,
+                    end_points_of_contours: ref epoc, instructions: ref instr,
+                    points: ref points 
+                } => {
+                    let mut g = Group::new();
+                    g.append(Rectangle::new().set("x",x_min).set("y",y_min).set("width",x_max-x_min).set("height",y_max-y_min).set("fill","none").set("stroke","black").set("stroke-width",6));
+                    for (i,p) in points.iter().enumerate() {
+                        g.append(Circle::new().set("cx",p.x).set("cy",p.y).set("r",6).set("fill",
+                                                                                          if p.on_curve { "black" } else { "red" }));
+                        g.append(Text::new().set("x",p.x+10).set("y",p.y+10).add(svg::node::Text::new(format!("{}",i))));
+                    }
+                    let mut last_ep = 0;
+                    for &ep in epoc {
+                        g.append(Path::new().set("fill","none")
+                                 .set("stroke","blue").set("stroke-width",6)
+                                 .set("d",generate_contour(&points, last_ep, ep as usize + 1)));
+                        last_ep = ep as usize;
+                    }
+                    doc.append(g.set("transform", format!("translate({} {})", gx, gy)));
+                    gx += ((x_max-x_min)*2) as u64;
+                    if gx > 30000 {
+                        gx = 0;
+                        gy += ((y_max-y_min)*2) as u64;
+                    }
+                },
+                    _ => println!("compound glyph!")
+            }
         }
 
         doc.assign("viewBox", (0, -500, 32000, gy+3000));
