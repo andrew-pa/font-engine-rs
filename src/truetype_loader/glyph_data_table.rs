@@ -97,10 +97,10 @@ impl Debug for GlyphDescription {
 
 impl GlyphDescription {
     fn from_binary<R: Read+Seek>(reader: &mut R, num_points: usize, glyph_length: usize) -> io::Result<GlyphDescription> {
-        println!("reading glyph p{} l{}", num_points, glyph_length);
+        //println!("reading glyph p{} l{}", num_points, glyph_length);
         if glyph_length == 0 { println!("0-len glyph?"); return Ok(GlyphDescription::None); }
         let num_contours = reader.read_i16::<BigEndian>()?;
-        println!("num contours = {}", num_contours);
+        //println!("num contours = {}", num_contours);
         let x_min = reader.read_i16::<BigEndian>()?;
         let y_min = reader.read_i16::<BigEndian>()?;
         let x_max = reader.read_i16::<BigEndian>()?;
@@ -111,7 +111,7 @@ impl GlyphDescription {
             for _ in 0..num_contours {
                 epoc.push(reader.read_u16::<BigEndian>()?);
             }
-            println!("end points of contours = {:?}", epoc);
+            //println!("end points of contours = {:?}", epoc);
             let num_instr = reader.read_u16::<BigEndian>()?;
             let mut instr = vec![0u8; num_instr as usize];
             reader.read_exact(instr.as_mut_slice())?;
@@ -123,12 +123,12 @@ impl GlyphDescription {
             while i < data.len() {
                 let d0 = data[i];
                 let flag = GlyphPointFlags::from_bits_truncate(d0);
-                println!("{} point [ flags = {:b}/{:?} ]", points.len(), d0, flag);
+                //println!("{} point [ flags = {:b}/{:?} ]", points.len(), d0, flag);
                 i += 1;
                 let repeat_count = 
                     if flag.intersects(GP_Repeat) {
                         let v = data[i];
-                        println!("repeat = {}", v);
+                        //println!("repeat = {}", v);
                         i += 1;
                         v + 1
                     } else {
@@ -140,7 +140,7 @@ impl GlyphDescription {
                 }
                 if points.len() >= n { break; }
             }
-            println!("found {} points of {}, ifl = {}, d.l = {}, left={}", points.len(), n, i, data.len(), data.len()-i);
+            //println!("found {} points of {}, ifl = {}, d.l = {}, left={}", points.len(), n, i, data.len(), data.len()-i);
             assert!(points.len() < data.len(), "absurd number of points!");
 
             fn load_vec(data: &Vec<u8>, i: &mut usize, last: &mut i32, short_vec: bool, sameorsign: bool) -> i32 {
@@ -153,25 +153,25 @@ impl GlyphDescription {
                     *last = last.wrapping_add((v as i16) as i32);
                     assert!(last.abs() < 30000);
                     *i += 2;
-                    print!("2");
-                } else { print!("!!! "); }
-                println!("i{} v{}", *i, *last); 
+                    //print!("2");
+                } //else { print!("!!! "); }
+                //println!("i{} v{}", *i, *last); 
                 *last
             }
 
             let mut last: i32 = 0;
             for mut p in &mut points {
-                if p.flag.intersects(GP_Repeat) { print!("REP "); }
+                //if p.flag.intersects(GP_Repeat) { /*print!("REP ");*/ }
                 p.x = load_vec(&data, &mut i, &mut last, p.flag.intersects(GP_XShortVec), p.flag.intersects(GP_XSameOrVecSign));
             }
-            println!("---");
+            //println!("---");
             last = 0;
             let mut count = 0;
             for mut p in &mut points {
-                if p.flag.intersects(GP_Repeat) { print!("REP "); }
+                //if p.flag.intersects(GP_Repeat) { print!("REP "); }
                 p.y = load_vec(&data, &mut i, &mut last, p.flag.intersects(GP_YShortVec), p.flag.intersects(GP_YSameOrVecSign));
                 count+=1;
-                print!("c{} ", count);
+                //print!("c{} ", count);
             }
             Ok(GlyphDescription::Simple {
                 num_contours: num_contours as u16,
@@ -188,7 +188,7 @@ impl GlyphDescription {
             let mut has_instructions = false;
             loop {
                 let flags = ComponentGlyphFlags::from_bits_truncate(reader.read_u16::<BigEndian>()?);
-                println!("flags = {:?}", flags);
+                //println!("flags = {:?}", flags);
                 let ix = reader.read_u16::<BigEndian>()?;
                 let (arg1, arg2) =
                     if flags.intersects(CGF_ARGS_ARE_WORDS) {
@@ -231,15 +231,15 @@ impl GlyphDescription {
             }
             let instr = if has_instructions {
                 let num_instr = reader.read_u16::<BigEndian>()?;
-                println!("reading {} instrs", num_instr);
+                //println!("reading {} instrs", num_instr);
                 let mut i = vec![0u8; num_instr as usize];
                 reader.read_exact(i.as_mut_slice())?;
                 i
-            } else { println!("no instrs"); vec![0u8,0] };
+            } else { /*println!("no instrs");*/ vec![0u8,0] };
             Ok(GlyphDescription::Composite{components:components,instructions:instr})
         } else { //this might be invalid, you might be supposed to read a single glyph anyway, but i fail to see how there
                  //could be glyph data if there are no contours
-            println!("no glyph data?");     
+            /*println!("no glyph data?");*/     
             Ok(GlyphDescription::None)
         }
     }

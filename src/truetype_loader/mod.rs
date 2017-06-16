@@ -50,7 +50,7 @@ macro_rules! table_tag_code {
 
 #[repr(u32)]
 #[derive(Copy, Clone)]
-enum TableTag {
+pub enum TableTag {
     //Required Tables
     CharGlyphMapping = table_tag_code!('c','m','a','p'),
     GlyphData = table_tag_code!('g','l','y','f'),
@@ -86,16 +86,16 @@ impl Debug for TableTag {
     }
 }
 
-trait Table : Debug {
+pub trait Table : Debug {
     fn tag(&self) -> TableTag;
 }
 
 mod char_glyph_mapping_table;
-use self::char_glyph_mapping_table::*;
+pub use self::char_glyph_mapping_table::*;
 mod glyph_data_table;
-use self::glyph_data_table::*;
+pub use self::glyph_data_table::*;
 
-struct ControlValueTable(Vec<i16>);
+pub struct ControlValueTable(Vec<i16>);
 
 impl Table for ControlValueTable {
     fn tag(&self) -> TableTag { TableTag::ControlValue }
@@ -107,7 +107,7 @@ impl Debug for ControlValueTable {
     }
 }
 
-struct FontProgram(Vec<u8>);
+pub struct FontProgram(Vec<u8>);
 
 impl Table for FontProgram {
     fn tag(&self) -> TableTag { TableTag::FontProgram }
@@ -127,13 +127,13 @@ bitflags! {
 }
 
 #[derive(Copy, Clone, Debug)]
-struct GASPRange {
+pub struct GASPRange {
     range_max_ppem: u16,
     range_gasp_behavior: u16
 }
 
 #[derive(Debug)]
-struct GASPTable {
+pub struct GASPTable {
     version: u16,
     gasp_ranges: Vec<GASPRange>
 }
@@ -149,7 +149,7 @@ impl GASPTable {
         let mut r = Vec::new();
         for _ in 0..num_ranges {
             let gb = reader.read_u16::<BigEndian>()?;
-            println!("GASP bits {:b}b ; {:b}b", gb, GASP_GRIDFIT.bits());
+            //println!("GASP bits {:b}b ; {:b}b", gb, GASP_GRIDFIT.bits());
             r.push(GASPRange {
                 range_max_ppem: reader.read_u16::<BigEndian>()?,
                 range_gasp_behavior: /*match GASPBehavior::from_bits(gb) {
@@ -180,7 +180,7 @@ impl Debug for DeviceRecord {
 
 
 #[derive(Debug)]
-struct HorizDeviceMetricsTable {
+pub struct HorizDeviceMetricsTable {
     version: u16,
     records: Vec<DeviceRecord>
 }
@@ -215,7 +215,7 @@ impl Table for HorizDeviceMetricsTable {
 }
 
 #[derive(Copy, Clone, Debug)]
-struct FontHeader {
+pub struct FontHeader {
     version: Fixed,
     font_rev: Fixed,
     checksum: u32,
@@ -338,7 +338,7 @@ impl LocationTable {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-struct TableDirectoryEntry {
+pub struct TableDirectoryEntry {
     tag: TableTag, check_sum: u32, offset: u32, length: u32
 }
 impl TableDirectoryEntry {
@@ -354,25 +354,25 @@ impl TableDirectoryEntry {
 
 #[repr(C)]
 #[derive(Debug)]
-struct SfntFont {
-    sfnt_version: Fixed,
-    search_range: u16,
-    entry_selector: u16,
-    range_shift: u16,
-    table_directory: Vec<TableDirectoryEntry>,
-    cmap_table: Option<CharGlyphMappingTable>,
-    cval_table: Option<ControlValueTable>,
-    fprg_table: Option<FontProgram>,
-    gasp_table: Option<GASPTable>,
-    glyf_table: Option<GlyphDataTable>,
-    loca_table: Option<LocationTable>,
-    hdmx_table: Option<HorizDeviceMetricsTable>,
-    head_table: Option<FontHeader>,
-    maxp_table: Option<MaxProfileTable>
+pub struct SfntFont {
+    pub sfnt_version: Fixed,
+    pub search_range: u16,
+    pub entry_selector: u16,
+    pub range_shift: u16,
+    pub table_directory: Vec<TableDirectoryEntry>,
+    pub cmap_table: Option<CharGlyphMappingTable>,
+    pub cval_table: Option<ControlValueTable>,
+    pub fprg_table: Option<FontProgram>,
+    pub gasp_table: Option<GASPTable>,
+    pub glyf_table: Option<GlyphDataTable>,
+    pub loca_table: Option<LocationTable>,
+    pub hdmx_table: Option<HorizDeviceMetricsTable>,
+    pub head_table: Option<FontHeader>,
+    pub maxp_table: Option<MaxProfileTable>
 }
 
 impl SfntFont {
-    fn from_binary<R: Read + Seek>(reader : &mut R) -> io::Result<SfntFont> {
+    pub fn from_binary<R: Read + Seek>(reader : &mut R) -> io::Result<SfntFont> {
         let version = Fixed::from_binary::<R,BigEndian>(reader)?;
         let num_tables = reader.read_u16::<BigEndian>()?;
         let search_range = reader.read_u16::<BigEndian>()?;
@@ -388,7 +388,7 @@ impl SfntFont {
                 _ => table_directory.push(tbe)
             }
         }
-        println!("table directory: {:?}", table_directory);
+        //println!("table directory: {:?}", table_directory);
         let mut fnt = SfntFont {
             sfnt_version: version,
             search_range: search_range,
@@ -437,12 +437,12 @@ impl SfntFont {
                     fnt.hdmx_table = Some(HorizDeviceMetricsTable::from_binary(reader,
                                     fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before hdmx table!"))?.num_glyphs as usize)?),
                 TableTag::FontHeader =>
-                    fnt.head_table = Some({ let v = FontHeader::from_binary(reader)?; println!("got head table = {:?}", v); v } ),
+                    fnt.head_table = Some({ let v = FontHeader::from_binary(reader)?; /*println!("got head table = {:?}", v);*/ v } ),
                 TableTag::MaxProfile => {
                     fnt.maxp_table = Some(MaxProfileTable::from_binary(reader)?);
-                    println!("got maxp table = {:?}", fnt.maxp_table);
+                    //println!("got maxp table = {:?}", fnt.maxp_table);
                 }
-                _ =>  { println!("Unknown table tag: {:?}!", tde.tag); continue; }
+                _ =>  { /*println!("Unknown table tag: {:?}!", tde.tag);*/ continue; }
             }
         }
         Ok(fnt)
@@ -542,7 +542,7 @@ mod tests {
         
         let mut doc = Document::new();
         let mut gx : u64 = 0; let mut gy : u64 = 0; let mut limit = 0;
-        for g in font.glyf_table.unwrap().glyphs.iter().take(128) {
+        for (index, g) in font.glyf_table.unwrap().glyphs.iter().take(128).enumerate() {
             match g {
                 &GlyphDescription::Simple { 
                     num_contours: _, x_max, x_min, y_max, y_min,
@@ -550,10 +550,21 @@ mod tests {
                     points: ref points 
                 } => {
                     let mut g = Group::new();
-                    g.append(Rectangle::new().set("x",x_min).set("y",y_min).set("width",x_max-x_min).set("height",y_max-y_min).set("fill","none").set("stroke","black").set("stroke-width",6));
+                    g.append(Rectangle::new()
+                             .set("x",x_min)
+                             .set("y",y_min)
+                             .set("width",x_max-x_min)
+                             .set("height",y_max-y_min)
+                             .set("fill","none")
+                             .set("stroke","black")
+                             .set("stroke-width",6));
+                    g.append(Text::new().set("x",x_min+10).set("y",x_min+10).add(svg::node::Text::new(format!("g{}",index))));
                     for (i,p) in points.iter().enumerate() {
-                        g.append(Circle::new().set("cx",p.x).set("cy",p.y).set("r",6).set("fill",
-                                                                                          if p.on_curve { "black" } else { "red" }));
+                        g.append(Circle::new()
+                                 .set("cx",p.x)
+                                 .set("cy",p.y)
+                                 .set("r",6)
+                                 .set("fill", if p.on_curve { "black" } else { "red" }));
                         g.append(Text::new().set("x",p.x+10).set("y",p.y+10).add(svg::node::Text::new(format!("{}",i))));
                     }
                     let mut last_ep = 0;
@@ -570,7 +581,7 @@ mod tests {
                         gy += 3000;
                     }limit+=1;
                 },
-                    _ => println!("compound glyph!")
+                _ => {} //println!("compound glyph!")
             }
         }
 
