@@ -9,3 +9,4 @@ bitflags = "0.7.0"
 
 [dev-dependencies]
 svg = "0.5.4"
+image = "0.14.0"
