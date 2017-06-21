@@ -216,22 +216,22 @@ impl Table for HorizDeviceMetricsTable {
 
 #[derive(Copy, Clone, Debug)]
 pub struct FontHeader {
-    version: Fixed,
-    font_rev: Fixed,
-    checksum: u32,
-    flags: u16,
-    units_per_em: u16,
-    created: u64,
-    modified: u64,
-    x_min: i16,
-    y_min: i16,
-    x_max: i16,
-    y_max: i16,
-    mac_style: u16,
-    lowest_rec_ppem: u16,
-    font_direction_hint: i16,
-    index_to_locformat: i16,
-    glyph_data_format: i16
+    pub version: Fixed,
+    pub font_rev: Fixed,
+    pub checksum: u32,
+    pub flags: u16,
+    pub units_per_em: u16,
+    pub created: u64,
+    pub modified: u64,
+    pub x_min: i16,
+    pub y_min: i16,
+    pub x_max: i16,
+    pub y_max: i16,
+    pub mac_style: u16,
+    pub lowest_rec_ppem: u16,
+    pub font_direction_hint: i16,
+    pub index_to_locformat: i16,
+    pub glyph_data_format: i16
 }
 
 impl FontHeader {
