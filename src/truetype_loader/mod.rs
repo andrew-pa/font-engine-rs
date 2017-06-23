@@ -458,6 +458,14 @@ mod tests {
     use super::*;
     use std::fs::File;
 
+    #[cfg(target_os="windows")]
+    const FONT_PATH: &'static str = 
+        "C:\\Windows\\Fonts\\arial.ttf";
+    #[cfg(target_os="macos")]
+    const FONT_PATH: &'static str = 
+        "/Library/Fonts/Arial.ttf";
+
+
     #[test]
     fn test_tabletag() {
         println!("{:?} = {:X} = {:X}", TableTag::CharGlyphMapping, TableTag::CharGlyphMapping as u32, 0x636D6170);
@@ -468,14 +476,7 @@ mod tests {
     fn test_loader() {
 
         //this needs to be changed to be xplat, probably a font in the repo
-        let mut font_file = File::open(
-            //"/Library/Fonts/Arial.ttf"
-            "C:\\Windows\\Fonts\\arial.ttf"
-            //"C:\\Windows\\Fonts\\comic.ttf"
-            //"FantasqueSansMono-Regular.ttf"
-            //"uu.ttf"
-            //"test.TTF"
-            ).unwrap();
+        let mut font_file = File::open(FONT_PATH).expect("font file");
 
         let f = SfntFont::from_binary(&mut font_file).unwrap();
         println!("SfntFont = {:?}", f);
@@ -488,8 +489,8 @@ mod tests {
         use self::svg::node::element::{Text, Path, Rectangle, Circle, Group};
         use self::svg::node::element::path::{Data};
 
-        let mut font_file = File::open("C:\\Windows\\Fonts\\arial.ttf").unwrap();
-        let font = SfntFont::from_binary(&mut font_file).unwrap();
+        let mut font_file = File::open(FONT_PATH).expect("font file");
+        let font = SfntFont::from_binary(&mut font_file).expect("loaded font");
 
         /*let GlyphDescription::Simple { 
             num_contours: _, x_max: x_max, x_min: x_min, y_max: y_max, y_min: y_min,

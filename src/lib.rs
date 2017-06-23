@@ -178,6 +178,11 @@ pub struct Rasterizer {
     units_per_em: f32
 }
 
+fn inside<T: PartialOrd>(x: T, min: T, max: T) -> bool {
+    let (rmin, rmax) = if min > max { (max, min) } else { (min, max) };
+    x > rmin && x < rmax
+}
+
 impl Curve {
     
     // intersects this curve with a test ray that goes along the +Y direction from the point (x,y)
@@ -187,9 +192,19 @@ impl Curve {
                 // y-y1 = m(x-x1)
                 // y = $y; is there an x value that satisfies? x = (y-y1)/m + x1 
                 // x must be less than end.x and greater than start.x
+                // wait: what if m = 0 or m = +/- inf? line reduces to a basic interval
                 let m = (points[end].y - points[start].y) / (points[end].x - points[start].x);
-                let x = (y - points[start].y)/m + points[start].x;
-                x < points[end].x && x >= tx
+                if m == 0f32 {
+                    // change in y = 0, so only X point matters
+                    inside(tx, points[start].x, points[end].x)
+                } else if m == std::f32::INFINITY || m == std::f32::NEG_INFINITY {
+                    // change in x = 0, so only Y point matters
+                    inside(y, points[start].y, points[end].y)
+                } else {
+                    let x = (y - points[start].y)/m + points[start].x;
+                    println!("m={}, x={}", m, x);
+                    x < points[end].x && x >= tx
+                }
             },
             &Curve::Quad(start, ctrl, end) => {
                 // (x,y) = (1-t)²p₀ + 2*(1-t)*t*p₁ + t²p₂
@@ -208,33 +223,41 @@ impl Rasterizer {
 
     pub fn raster_glyph<'a>(&self, glyph: &Glyph, bitmap: &'a mut [u8], width: usize, point_size: f32) -> &'a [u8] {
         let scale = point_size * self.output_dpi / (72f32 * self.units_per_em);
+        println!("scale = {}", scale);
+        let height = bitmap.len() / width;
         let points: Vec<Point> = glyph.points.iter().map(|&p| Point { x: p.x * scale, y: p.y * scale }).collect();
         //grid fit the outline
         // this involves interpreting some instructions
         //rasterize by scan line
-        let height = bitmap.len() / width;
         for y in 0..height {
             for x in 0..width {
-                let mut count = 0;
+                let mut count: isize = 0;
                 for c in &glyph.curves {
                     if c.intersects_test_ray(&points, x as f32, y as f32) {
                         let (start,end) = match c {
                             &Curve::Line(start,end) => (start,end),
                             &Curve::Quad(start,_,end) => (start,end)
                         };
-                        if points[start].y < points[end].y { //|| points[start].x > points[end].x {
+                        //if start < end {
+                        if points[start].y < y as f32 {
                             // contour crossed from right/left or bottom/top
+                            println!("+ {} {}, {} {}", x, y, start, end);
                             count += 1;
                         } else {
                             // contour crossed from left/right or top/bottom
+                            println!("- {} {}, {} {}", x, y, start, end);
                             count -= 1;
                         }
                     }
                 }
-                if count > 0 {
-                    bitmap[x + y*width] = 255;
-                }
+                //if count > 0 {
+                    bitmap[x + y*width] = (count.abs() * 64) as u8;
+                //}
             }
+        }
+        for p in points {
+            println!("{:?}", p);
+            bitmap[(p.x as usize) + (p.y.abs() as usize)*width] = 128;
         }
         bitmap
     }
@@ -289,12 +312,18 @@ mod tests {
         doc
     }
 
-    const test_glyph_index: usize = 6;
+    const test_glyph_index: usize = 0;
+    #[cfg(target_os="windows")]
+    const FONT_PATH: &'static str = 
+        "C:\\Windows\\Fonts\\arial.ttf";
+    #[cfg(target_os="macos")]
+    const FONT_PATH: &'static str = 
+        "/Library/Fonts/Arial.ttf";
 
     #[test]
     fn load_truetype_svg_out() {
         use truetype_loader::*;
-        let mut font_file = File::open("C:\\Windows\\Fonts\\arial.ttf").unwrap();
+        let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
 
         let g = Glyph::from_truetype(&font.glyf_table.expect("glyf table").glyphs[test_glyph_index]).unwrap();
@@ -305,7 +334,7 @@ mod tests {
     #[test]
     fn load_truetype_raster_outline() {
         use truetype_loader::*;
-        let mut font_file = File::open("C:\\Windows\\Fonts\\arial.ttf").unwrap();
+        let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
         
         let g = Glyph::from_truetype(&font.glyf_table.expect("glyf table").glyphs[test_glyph_index]).unwrap();
@@ -315,7 +344,7 @@ mod tests {
         let mut bm = Vec::new();
         bm.resize(512*512, 0u8);
 
-        rr.raster_glyph(&g, bm.as_mut_slice(), 512, 200f32);
+        rr.raster_glyph(&g, &mut bm[..], 512, 200f32);
 
         let im = ImageBuffer::from_raw(512,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lgloutt.png")).expect("creating output file");
