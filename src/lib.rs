@@ -180,7 +180,8 @@ pub struct Rasterizer {
 
 fn inside<T: PartialOrd>(x: T, min: T, max: T) -> bool {
     let (rmin, rmax) = if min > max { (max, min) } else { (min, max) };
-    x > rmin && x < rmax
+    assert!(rmin <= rmax);
+    x >= rmin && x <= rmax
 }
 
 impl Curve {
@@ -194,18 +195,24 @@ impl Curve {
                 // x must be less than end.x and greater than start.x
                 // wait: what if m = 0 or m = +/- inf? line reduces to a basic interval
                 let m = (points[end].y - points[start].y) / (points[end].x - points[start].x);
+                //println!("tx={}, ty={}, points[start]={:?}, points[end]={:?}, X{}, Y{}", tx, y, points[start], points[end], inside(tx, points[start].x, points[end].x), inside(y, points[start].y, points[end].y));
                 if m == 0f32 {
+                    // y-y1 = 0(x-x1)
                     // change in y = 0, so only X point matters
-                    inside(tx, points[start].x, points[end].x)
+                    //println!("tx={}, ty={}, points[start]={:?}, points[end]={:?}, X{}, Y{}", tx, y, points[start], points[end], inside(tx, points[start].x, points[end].x), inside(y, points[start].y, points[end].y));
+                    //inside(y, points[start].y, points[end].y) 
+                    false
                 } else if m == std::f32::INFINITY || m == std::f32::NEG_INFINITY {
                     // change in x = 0, so only Y point matters
-                    inside(y, points[start].y, points[end].y)
+                    inside(y, points[start].y, points[end].y) && tx <= points[start].x 
                 } else {
                     let x = (y - points[start].y)/m + points[start].x;
-                    println!("m={}, x={}", m, x);
-                    x < points[end].x && x >= tx
+                    //println!("m={}, x={}", m, x);
+                    //x >= tx
+                    inside(x, points[start].x, points[end].x) && x >= tx
                 }
             },
+
             &Curve::Quad(start, ctrl, end) => {
                 // (x,y) = (1-t)²p₀ + 2*(1-t)*t*p₁ + t²p₂
                 // y = $y; there are two t values that satisfy, and the x values can be found using
@@ -248,11 +255,13 @@ impl Rasterizer {
                             println!("- {} {}, {} {}", x, y, start, end);
                             count -= 1;
                         }
+                        //println!("{} {}", x, y);
+                        //count += 1;
                     }
                 }
-                //if count > 0 {
-                    bitmap[x + y*width] = (count.abs() * 64) as u8;
-                //}
+                if count < 0 {
+                    bitmap[x + y*width] = 255;
+                }
             }
         }
         for p in points {
@@ -312,7 +321,7 @@ mod tests {
         doc
     }
 
-    const test_glyph_index: usize = 0;
+    const test_glyph_index: usize = 6;
     #[cfg(target_os="windows")]
     const FONT_PATH: &'static str = 
         "C:\\Windows\\Fonts\\arial.ttf";
@@ -344,7 +353,7 @@ mod tests {
         let mut bm = Vec::new();
         bm.resize(512*512, 0u8);
 
-        rr.raster_glyph(&g, &mut bm[..], 512, 200f32);
+        rr.raster_glyph(&g, &mut bm[..], 512, 300f32);
 
         let im = ImageBuffer::from_raw(512,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lgloutt.png")).expect("creating output file");
