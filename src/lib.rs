@@ -184,6 +184,12 @@ fn inside<T: PartialOrd>(x: T, min: T, max: T) -> bool {
     x >= rmin && x <= rmax
 }
 
+enum Multiple<T> {
+    None,
+    One(T),
+    Two(T, T)
+}
+
 impl Curve {
     
     // intersects this curve with a test ray that goes along the +Y direction from the point (x,y)
@@ -219,8 +225,41 @@ impl Curve {
                 // the original equation. If we only wish to check existance, only the determinant
                 // matters
                 let a = points[start].y; let b = points[ctrl].y; let c = points[end].y;
-                let det = -a*c + a*y + b*b - 2f32*b*y + c*y + a-b;
+                let det = -a*c + a*y + b*b - 2f32*b*y + c*y;
                 det > 0f32
+            }
+        }
+    }
+
+    fn intersect_scanline(&self, points: &Vec<Point>, y: f32, result: &mut Vec<f32>) {
+        match self {
+            &Curve::Line(start, end) => {
+                let Point{x: startx, y: starty} = points[start];
+                let Point{x: endx, y: endy} = points[end];
+                if !inside(y, starty, endy) { return; }
+                if (startx-endx).abs() < 0.001 {
+                    result.push(startx); 
+                } else if (starty-endy).abs() < 0.001 {
+                    result.push(startx); result.push(endx); 
+                } else {
+                    let m = (endy-starty)/(endx-startx);
+                    result.push((y-starty)/m + startx); 
+                }
+            },
+            &Curve::Quad(start, ctrl, end) => {
+                let a = points[start].y; let b = points[ctrl].y; let c = points[end].y;
+                let det = -a*c + a*y + b*b - 2.0*b*y + c*y;
+                if det < 0.0 { return; }
+                let sqrt_det = det.sqrt();
+                let denom = -a + 2.0*b - c;
+                let t1 = (-sqrt_det - a + b) / denom;
+                let t2 = (sqrt_det - a + b) / denom;
+                if inside(t1, 0.0, 1.0) {
+                    result.push((1.0-t1)*(1.0-t1)*points[start].x + 2.0*(1.0-t1)*t1*points[ctrl].x + t1*t1*points[end].x);
+                }
+                if inside(t2, 0.0, 1.0) {
+                    result.push((1.0-t2)*(1.0-t2)*points[start].x + 2.0*(1.0-t2)*t2*points[ctrl].x + t2*t2*points[end].x);
+                }
             }
         }
     }
@@ -284,7 +323,7 @@ mod tests {
     extern crate svg;
 
     use self::svg::{Document,Node};
-    use self::svg::node::element::{Text, Path as GPath, Rectangle, Circle, Group};
+    use self::svg::node::element::{Text, Path as GPath, Rectangle, Circle, Group, Line};
     use self::svg::node::element::path::Data;
 
     fn glyph_to_svg(g: &Glyph, scale: f32) -> Document {
@@ -321,7 +360,7 @@ mod tests {
         doc
     }
 
-    const test_glyph_index: usize = 6;
+    const test_glyph_index: usize = 54;
     #[cfg(target_os="windows")]
     const FONT_PATH: &'static str = 
         "C:\\Windows\\Fonts\\arial.ttf";
@@ -338,6 +377,28 @@ mod tests {
         let g = Glyph::from_truetype(&font.glyf_table.expect("glyf table").glyphs[test_glyph_index]).unwrap();
         let doc = glyph_to_svg(&g, 0.5f32);
         svg::save("glyph_conv.svg", &doc).unwrap();
+    }
+
+    #[test]
+    fn intersect_outlines_svg() {
+        use truetype_loader::*;
+        let mut font_file = File::open(FONT_PATH).unwrap();
+        let font = SfntFont::from_binary(&mut font_file).expect("load font data");
+        let g = Glyph::from_truetype(&font.glyf_table.expect("glyf table").glyphs[test_glyph_index]).unwrap();
+        let mut doc = glyph_to_svg(&g, 1.0f32);
+        for iy in (0u32..90u32) {
+            let y = (iy as f32) * 32.0;
+            let mut ipoints = Vec::new();
+            for curve in g.curves.iter() {
+                curve.intersect_scanline(&g.points, y, &mut ipoints);
+            }
+            doc.append(Line::new().set("x1", 0).set("y1", y)
+                       .set("x2", 2048.0).set("y2", y).set("stroke", "blue").set("stroke-width", 4));
+            for x in ipoints {
+                doc.append(Circle::new().set("cx",x).set("cy",y).set("r",6).set("fill","blue"));
+            }
+        }
+        svg::save("glyph_intersect.svg", &doc).unwrap();
     }
 
     #[test]
