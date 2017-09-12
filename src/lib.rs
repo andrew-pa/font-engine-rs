@@ -1,3 +1,4 @@
+#![feature(slice_patterns)]
 
 #[macro_use]
 extern crate bitflags;
@@ -271,42 +272,26 @@ impl Rasterizer {
         let scale = point_size * self.output_dpi / (72f32 * self.units_per_em);
         println!("scale = {}", scale);
         let height = bitmap.len() / width;
-        let points: Vec<Point> = glyph.points.iter().map(|&p| Point { x: p.x * scale, y: p.y * scale }).collect();
+        let points: Vec<Point> = glyph.points.iter().map(|&p| Point { x: p.x * scale + 8.0, y: (self.units_per_em-p.y) * scale }).collect();
         //grid fit the outline
         // this involves interpreting some instructions
         //rasterize by scan line
         for y in 0..height {
-            for x in 0..width {
-                let mut count: isize = 0;
-                for c in &glyph.curves {
-                    if c.intersects_test_ray(&points, x as f32, y as f32) {
-                        let (start,end) = match c {
-                            &Curve::Line(start,end) => (start,end),
-                            &Curve::Quad(start,_,end) => (start,end)
-                        };
-                        //if start < end {
-                        if points[start].y < y as f32 {
-                            // contour crossed from right/left or bottom/top
-                            println!("+ {} {}, {} {}", x, y, start, end);
-                            count += 1;
-                        } else {
-                            // contour crossed from left/right or top/bottom
-                            println!("- {} {}, {} {}", x, y, start, end);
-                            count -= 1;
-                        }
-                        //println!("{} {}", x, y);
-                        //count += 1;
-                    }
-                }
-                if count < 0 {
-                    bitmap[x + y*width] = 255;
+            let mut xs = Vec::new();
+            for curve in &glyph.curves {
+                curve.intersect_scanline(&points, y as f32, &mut xs);
+            }
+            xs.sort_unstable_by(|a, b| if *a < *b { ::std::cmp::Ordering::Less } else { ::std::cmp::Ordering::Greater });
+            for px in xs.chunks(2) {
+                for x in (px[0] as usize)..(px[1] as usize) {
+                    bitmap[x + (y as usize)*width] = 255;
                 }
             }
         }
-        for p in points {
+        /*for p in points {
             println!("{:?}", p);
             bitmap[(p.x as usize) + (p.y.abs() as usize)*width] = 128;
-        }
+        }*/
         bitmap
     }
 }
@@ -360,7 +345,7 @@ mod tests {
         doc
     }
 
-    const test_glyph_index: usize = 54;
+    const test_glyph_index: usize = 9;
     #[cfg(target_os="windows")]
     const FONT_PATH: &'static str = 
         "C:\\Windows\\Fonts\\arial.ttf";
@@ -414,7 +399,7 @@ mod tests {
         let mut bm = Vec::new();
         bm.resize(512*512, 0u8);
 
-        rr.raster_glyph(&g, &mut bm[..], 512, 300f32);
+        rr.raster_glyph(&g, &mut bm[..], 512, 24f32);
 
         let im = ImageBuffer::from_raw(512,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lgloutt.png")).expect("creating output file");
