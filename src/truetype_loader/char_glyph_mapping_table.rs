@@ -10,16 +10,16 @@ use super::*;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-struct HighByteMappingSubheader {
+pub struct HighByteMappingSubheader {
     first_code: u16,
     entry_count: u16,
     id_delta: i16,
     id_range_offset: u16
 }
 
-enum CharGlyphMappingEncodingTableFormat {
+pub enum CharGlyphMappingEncodingTableFormat {
     ByteEncoding {
-        glyph_ids: [u16; 256]
+        glyph_ids: [u8; 256]
     },
     HighByteMapping {
         subheader_keys: [u16; 256],
@@ -56,17 +56,17 @@ impl Debug for CharGlyphMappingEncodingTableFormat {
 }
 
 #[derive(Debug)]
-struct CharGlyphMappingEncodingTable {
+pub struct CharGlyphMappingEncodingTable {
     platform_id: u16,
     platform_encoding_id: u16,
     version: u16,
-    subtable: CharGlyphMappingEncodingTableFormat
+    pub subtable: CharGlyphMappingEncodingTableFormat
 }
 
 #[derive(Debug)]
 pub struct CharGlyphMappingTable {
     table_version: u16,
-    encoding_tables: Vec<CharGlyphMappingEncodingTable>
+    pub encoding_tables: Vec<CharGlyphMappingEncodingTable>
 }
 
 impl CharGlyphMappingTable {
@@ -92,9 +92,9 @@ impl CharGlyphMappingTable {
                     version: ver,
                     subtable: match format {
                         0 => {
-                            let mut glyph_ids = [0u16; 256];
+                            let mut glyph_ids = [0u8; 256];
                             for i in 0..256 {
-                                glyph_ids[i] = reader.read_u16::<BigEndian>()?;
+                                glyph_ids[i] = reader.read_u8()?;
                             }
                             CharGlyphMappingEncodingTableFormat::ByteEncoding { glyph_ids: glyph_ids }
                         },

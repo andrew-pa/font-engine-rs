@@ -33,6 +33,30 @@ pub struct Glyph {
     points: Vec<Point>,
 }
 
+struct CharMap<'fontdata> {
+    id_map: &'fontdata [u8; 256]
+}
+
+impl<'fontdata> CharMap<'fontdata> {
+    fn from_truetype<'f>(font: &'f truetype_loader::SfntFont) -> CharMap<'f> {
+        CharMap {
+            id_map: font.cmap_table.as_ref().and_then(|table| {
+                for enc_tbl in &table.encoding_tables {
+                    match &enc_tbl.subtable {
+                        &truetype_loader::CharGlyphMappingEncodingTableFormat::ByteEncoding { glyph_ids: ref ids } => { return Some(ids) },
+                        _ => {}
+                    }
+                }
+                None
+            }).expect("font has format 0 table")
+        }
+    }
+    fn map(&self, c: char) -> usize {
+        let ci = c as u32;
+        if ci > 256 { return 0 }
+        self.id_map[ci as usize] as usize
+    }
+}
 
 fn wrap(i: usize, start: usize, end: usize) -> usize {
     let len = end-start;
@@ -44,10 +68,10 @@ fn wrap(i: usize, start: usize, end: usize) -> usize {
 }
 
 impl Glyph {
-    pub fn from_truetype(glyph: &truetype_loader::GlyphDescription) -> Option<Glyph> {
+    pub fn from_truetype(font: &truetype_loader::SfntFont, index: usize) -> Option<Glyph> {
         use truetype_loader::*;
-        println!("{:?}", glyph);
-        match glyph {
+        //println!("{:?}", glyph);
+        font.glyf_table.as_ref().and_then(|table| match &table.glyphs[index] {
             &GlyphDescription::Simple { 
                 num_contours, x_min, x_max, y_min, y_max, ref end_points_of_contours, ref instructions, points: ref spoints 
             } => {
@@ -96,82 +120,8 @@ impl Glyph {
             },
             &GlyphDescription::Composite { .. } => None,
             &GlyphDescription::None => None
-        }
+        })
     }
-
-    // render to grayscale, no AA
-    /*
-    pub fn raster_outline<'a>(&self, bitmap: &'a mut [u8], width: usize, height: usize) -> &'a [u8] {
-        
-        let ifheight = 1f32 / (height as f32);
-        let fwidth  = width as f32;
-
-        for y in 0..height {
-            // calculate intersection points
-            let fy = (y as f32) * ifheight;
-
-            let mut fxs : Vec<f32> = Vec::new();
-            for c in &self.curves {
-                match c {
-                    &Curve::Quad(ista, ictl, iend) => {
-                        let mut p = (self.points[ista], self.points[ictl], self.points[iend]);
-                        if p.0.x > p.2.x { let tmp = p.0; p.0 = p.2; p.2 = tmp; }
-                        let det = -2f32*fy*p.1.y + p.0.y*(fy-p.2.y) + fy*p.2.y + p.1.y*p.1.y;
-                        if det < 0f32 { continue; }
-                        let A = p.0.y - 2f32*p.1.y + p.2.y;
-                        if A == 0f32 { continue; }
-                        let ta =  (det.sqrt()-p.0.y+p.1.y)/A;
-                        let tb = -(det.sqrt()+p.0.y-p.1.y)/A;
-                        //if ta > 0f32 && ta < 1f32 
-                        { fxs.push((1f32-ta)*(1f32-ta)*p.0.x + 2f32*(1f32-ta)*ta*p.1.x + ta*ta*p.2.x); }
-                        //if tb > 0f32 && tb < 1f32 
-                        { fxs.push((1f32-tb)*(1f32-tb)*p.0.x + 2f32*(1f32-tb)*tb*p.1.x + tb*tb*p.2.x); }
-                    },
-                    &Curve::Line(ista, iend) => {
-                        let mut p = (self.points[ista], self.points[iend]);
-                        if p.0.y > p.1.y { let tmp = p.0; p.0 = p.1; p.1 = tmp; }
-                        if fy < p.0.y || fy > p.1.y { continue; }
-                        if p.1.x == p.0.x {
-                            print!("v");
-                            fxs.push(p.0.x);
-                        } else if p.1.y == p.0.y {
-                            print!("h");
-                            fxs.push(p.0.x);
-                            fxs.push(p.1.x);
-                        } else {
-                            let m = (p.1.y-p.0.y)/(p.1.x-p.0.x);
-                            // y-y1 = m(x-x1)
-                            fxs.push( (fy-p.0.y)/m + p.0.x );
-                        }
-                    }
-                }
-            }
-            //fxs.as_mut_slice().sort_by(|a,b| if a < b { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
-            println!("{:?}", fxs);
-
-            /*for sfx in fxs.chunks(2) { //.iter().map(|&v| v.abs()) {
-                if sfx.len() == 1 {
-                    let fx = sfx[0];
-                    if fx < 0f32 || fx > 1f32 { continue; }
-                    let x = (fx * fwidth) as usize;
-                    bitmap[y * width + x] = 255;
-                } else if sfx.len() == 2 {
-                    let x0 = (sfx[0]*fwidth) as usize;
-                    let x1 = (sfx[1]*fwidth) as usize;
-                    for x in x0..x1 {
-                        if x < 0 || x > width { continue; }
-                        bitmap[y * width + x] = 255;
-                    }
-                } else { panic!("???"); }
-            }*/
-            for fx in fxs.iter().map(|&v| v.abs()) {
-                if fx < 0f32 || fx > 1f32 { continue; }
-                let x = (fx*fwidth) as usize;
-                bitmap[y * width + x] = 255;
-            }
-        }
-        bitmap
-    } */
 }
 
 pub struct Rasterizer {
@@ -268,11 +218,14 @@ impl Curve {
 
 impl Rasterizer {
 
-    pub fn raster_glyph<'a>(&self, glyph: &Glyph, bitmap: &'a mut [u8], width: usize, point_size: f32) -> &'a [u8] {
+    pub fn raster_glyph<'a>(&self, glyph: &Glyph, bitmap: &'a mut [u8], width: usize, point_size: f32, offset: (f32,f32)) -> &'a [u8] {
         let scale = point_size * self.output_dpi / (72f32 * self.units_per_em);
         println!("scale = {}", scale);
         let height = bitmap.len() / width;
-        let points: Vec<Point> = glyph.points.iter().map(|&p| Point { x: p.x * scale + 8.0, y: (self.units_per_em-p.y) * scale }).collect();
+        let points: Vec<Point> = glyph.points.iter().map(|&p| Point {
+            x: p.x * scale + 8.0 + offset.0, 
+            y: (self.units_per_em-p.y) * scale + offset.1
+        }).collect();
         //grid fit the outline
         // this involves interpreting some instructions
         //rasterize by scan line
@@ -359,7 +312,7 @@ mod tests {
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
 
-        let g = Glyph::from_truetype(&font.glyf_table.expect("glyf table").glyphs[test_glyph_index]).unwrap();
+        let g = Glyph::from_truetype(&font, test_glyph_index).unwrap();
         let doc = glyph_to_svg(&g, 0.5f32);
         svg::save("glyph_conv.svg", &doc).unwrap();
     }
@@ -369,7 +322,7 @@ mod tests {
         use truetype_loader::*;
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
-        let g = Glyph::from_truetype(&font.glyf_table.expect("glyf table").glyphs[test_glyph_index]).unwrap();
+        let g = Glyph::from_truetype(&font, test_glyph_index).unwrap();
         let mut doc = glyph_to_svg(&g, 1.0f32);
         for iy in (0u32..90u32) {
             let y = (iy as f32) * 32.0;
@@ -392,17 +345,45 @@ mod tests {
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
         
-        let g = Glyph::from_truetype(&font.glyf_table.expect("glyf table").glyphs[test_glyph_index]).unwrap();
+        let g = Glyph::from_truetype(&font, test_glyph_index).unwrap();
 
         let rr = Rasterizer { output_dpi: 144f32, units_per_em: font.head_table.expect("head table").units_per_em as f32 };
         println!("u/em = {}", rr.units_per_em);
         let mut bm = Vec::new();
         bm.resize(512*512, 0u8);
 
-        rr.raster_glyph(&g, &mut bm[..], 512, 24f32);
+        rr.raster_glyph(&g, &mut bm[..], 512, 24f32, (32.0, 32.0));
 
         let im = ImageBuffer::from_raw(512,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lgloutt.png")).expect("creating output file");
+        let _ = image::ImageLuma8(im).save(fout, image::PNG);
+
+    }
+
+    #[test]
+    fn load_truetype_raster_string() {
+        use truetype_loader::*;
+        let mut font_file = File::open(FONT_PATH).unwrap();
+        let font = SfntFont::from_binary(&mut font_file).expect("load font data");
+
+        let rr = Rasterizer { output_dpi: 144f32, units_per_em: font.head_table.expect("head table").units_per_em as f32 };
+        println!("u/em = {}", rr.units_per_em);
+        let mut bm = Vec::new();
+        bm.resize(512*512, 0u8);
+
+        let s = "www.qxczv.pw";
+        let cm = CharMap::from_truetype(&font);
+        let mut offset = (32.0, 32.0);
+        for c in s.chars() {
+            let g = Glyph::from_truetype(&font, cm.map(c)).expect("load glyph");
+            rr.raster_glyph(&g, &mut bm[..], 512, 28f32, offset);
+            offset.0 += 30.0;
+        }
+
+        //rr.raster_glyph(&g, &mut bm[..], 512, 24f32);
+
+        let im = ImageBuffer::from_raw(512,512,bm).unwrap();
+        let ref mut fout = File::create(&Path::new("lstrout.png")).expect("creating output file");
         let _ = image::ImageLuma8(im).save(fout, image::PNG);
 
     }
