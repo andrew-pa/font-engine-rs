@@ -236,6 +236,7 @@ impl Rasterizer {
             }
             xs.sort_unstable_by(|a, b| if *a < *b { ::std::cmp::Ordering::Less } else { ::std::cmp::Ordering::Greater });
             for px in xs.chunks(2) {
+                if px.len() != 2 { continue; }
                 for x in (px[0] as usize)..(px[1] as usize) {
                     bitmap[x + (y as usize)*width] = 255;
                 }
@@ -366,23 +367,28 @@ mod tests {
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
 
+        println!("hhea: {:?}", font.hhea_table);
+
         let rr = Rasterizer { output_dpi: 144f32, units_per_em: font.head_table.expect("head table").units_per_em as f32 };
+        let point_size = 72.0;
+        let scale = point_size * rr.output_dpi / (72f32 * rr.units_per_em);
         println!("u/em = {}", rr.units_per_em);
         let mut bm = Vec::new();
-        bm.resize(512*512, 0u8);
+        bm.resize(1024*512, 0u8);
 
-        let s = "www.qxczv.pw";
+        let s = "@Test~String!$&";
         let cm = CharMap::from_truetype(&font);
-        let mut offset = (32.0, 32.0);
+        let mut offset = (8.0, 8.0);
         for c in s.chars() {
-            let g = Glyph::from_truetype(&font, cm.map(c)).expect("load glyph");
-            rr.raster_glyph(&g, &mut bm[..], 512, 28f32, offset);
-            offset.0 += 30.0;
+            let gi = cm.map(c);
+            let g = Glyph::from_truetype(&font, gi).expect("load glyph");
+            rr.raster_glyph(&g, &mut bm[..], 1024, point_size, offset);
+            offset.0 += font.hmtx_table.as_ref().map(|hmtx| hmtx.metrics[gi].advance_width as f32 * scale).unwrap();
         }
 
         //rr.raster_glyph(&g, &mut bm[..], 512, 24f32);
 
-        let im = ImageBuffer::from_raw(512,512,bm).unwrap();
+        let im = ImageBuffer::from_raw(1024,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lstrout.png")).expect("creating output file");
         let _ = image::ImageLuma8(im).save(fout, image::PNG);
 

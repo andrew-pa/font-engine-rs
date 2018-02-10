@@ -56,7 +56,7 @@ pub enum TableTag {
     GlyphData = table_tag_code!('g','l','y','f'),
     FontHeader = table_tag_code!('h', 'e', 'a', 'd'),
     HorizHeader = table_tag_code!('h', 'h', 'e', 'a'),
-    HorizMetics = table_tag_code!('h', 'm', 't', 'x'),
+    HorizMetrics = table_tag_code!('h', 'm', 't', 'x'),
     LocationIndex = table_tag_code!('l', 'o', 'c', 'a'),
     MaxProfile = table_tag_code!('m', 'a', 'x', 'p'),
     Nameing = table_tag_code!('n', 'a', 'm', 'e'),
@@ -214,6 +214,94 @@ impl Table for HorizDeviceMetricsTable {
     fn tag(&self) -> TableTag { TableTag::HorizDevMetric }
 }
 
+#[derive(Debug)]
+pub struct HorizHeaderTable {
+    version: Fixed,
+    ascent: i16,
+    descent: i16,
+    line_gap: i16,
+    advance_width_max: u16,
+    min_left_bearing: i16,
+    min_right_bearing: i16,
+    x_max_extent: i16,
+    caret_slope_rise: i16,
+    caret_slope_run: i16,
+    caret_offset: i16,
+    metric_data_format: i16,
+    num_long_horz_metric: u16
+}
+
+impl HorizHeaderTable {
+    fn from_binary<R: Read+Seek>(reader: &mut R) -> io::Result<Self> {
+        Ok(HorizHeaderTable {
+            version: Fixed::from_binary::<_, BigEndian>(reader)?,
+            ascent: reader.read_i16::<BigEndian>()?,
+            descent: reader.read_i16::<BigEndian>()?,
+            line_gap: reader.read_i16::<BigEndian>()?,
+            advance_width_max: reader.read_u16::<BigEndian>()?,
+            min_left_bearing: reader.read_i16::<BigEndian>()?,
+            min_right_bearing: reader.read_i16::<BigEndian>()?,
+            x_max_extent: reader.read_i16::<BigEndian>()?,
+            caret_slope_rise: reader.read_i16::<BigEndian>()?,
+            caret_slope_run: reader.read_i16::<BigEndian>()?,
+            caret_offset: {
+                // skip reserved spots
+                for _ in 0..4 { reader.read_i16::<BigEndian>()?; }
+                reader.read_i16::<BigEndian>()?
+            },
+            metric_data_format: reader.read_i16::<BigEndian>()?,
+            num_long_horz_metric: reader.read_u16::<BigEndian>()?,
+        })
+    }
+}
+
+impl Table for HorizHeaderTable {
+    fn tag(&self) -> TableTag { TableTag::HorizHeader }
+}
+
+
+#[derive(Debug)]
+pub struct LongHorizMetric {
+    pub advance_width: u16,
+    pub left_side_bearing: i16
+}
+
+impl LongHorizMetric {
+    fn from_binary<R: Read+Seek>(reader: &mut R) -> io::Result<Self> {
+        Ok(LongHorizMetric {
+            advance_width: reader.read_u16::<BigEndian>()?,
+            left_side_bearing: reader.read_i16::<BigEndian>()?
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct HorizMetricsTable {
+    left_side_bearing: Vec<i16>,
+    pub metrics: Vec<LongHorizMetric>
+}
+
+impl HorizMetricsTable {
+    fn from_binary<R: Read+Seek>(reader: &mut R, num_glyphs: usize, num_long_horz_metrics: usize) -> io::Result<Self> {
+        let mut mt = Vec::new();
+        for _ in 0..num_long_horz_metrics {
+            mt.push(LongHorizMetric::from_binary(reader)?);
+        }
+        let mut lsb = Vec::new();
+        for _ in 0..(num_glyphs-num_long_horz_metrics) {
+            lsb.push(reader.read_i16::<BigEndian>()?);
+        }
+        Ok(HorizMetricsTable {
+            left_side_bearing: lsb,
+            metrics: mt
+        })
+    }
+}
+
+impl Table for HorizMetricsTable {
+    fn tag(&self) -> TableTag { TableTag::HorizMetrics }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct FontHeader {
     pub version: Fixed,
@@ -367,6 +455,8 @@ pub struct SfntFont {
     pub glyf_table: Option<GlyphDataTable>,
     pub loca_table: Option<LocationTable>,
     pub hdmx_table: Option<HorizDeviceMetricsTable>,
+    pub hhea_table: Option<HorizHeaderTable>,
+    pub hmtx_table: Option<HorizMetricsTable>,
     pub head_table: Option<FontHeader>,
     pub maxp_table: Option<MaxProfileTable>
 }
@@ -402,6 +492,8 @@ impl SfntFont {
             glyf_table: None,
             loca_table: None,
             hdmx_table: None,
+            hhea_table: None,
+            hmtx_table: None,
             head_table: None,
             maxp_table: None,
         };
@@ -409,7 +501,7 @@ impl SfntFont {
             reader.seek(io::SeekFrom::Start(tde.offset as u64))?;
             match tde.tag {
                 TableTag::CharGlyphMapping =>
-                   fnt.cmap_table = Some(char_glyph_mapping_table::CharGlyphMappingTable::from_binary(reader, tde.offset as u64)?),
+                    fnt.cmap_table = Some(char_glyph_mapping_table::CharGlyphMappingTable::from_binary(reader, tde.offset as u64)?),
                 TableTag::ControlValue => {
                     let mut tbl = Vec::with_capacity((tde.length/2) as usize);
                     for _ in 0..tde.length {
@@ -426,22 +518,32 @@ impl SfntFont {
                     fnt.gasp_table = Some(GASPTable::from_binary(reader)?),
                 TableTag::GlyphData =>
                     fnt.glyf_table = Some(GlyphDataTable::from_binary(reader, tde.offset as u64,
-                                    fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before glyf table!"))?,
-                                    fnt.loca_table.as_ref().ok_or(io::Error::new(io::ErrorKind::Other, "Must load loca table before glyf table!"))? )?),
+                                                                      fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before glyf table!"))?,
+                                                                      fnt.loca_table.as_ref().ok_or(io::Error::new(io::ErrorKind::Other, "Must load loca table before glyf table!"))? )?),
                 TableTag::LocationIndex => {
                     fnt.loca_table = Some(LocationTable::from_binary(reader,
-                                    fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before loca table!"))?.num_glyphs as usize,
-                                    fnt.head_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load head table before loca table!"))?.index_to_locformat)?);
+                                                                     fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before loca table!"))?.num_glyphs as usize,
+                                                                     fnt.head_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load head table before loca table!"))?.index_to_locformat)?);
                 },
                 TableTag::HorizDevMetric =>
                     fnt.hdmx_table = Some(HorizDeviceMetricsTable::from_binary(reader,
-                                    fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before hdmx table!"))?.num_glyphs as usize)?),
+                                                                               fnt.maxp_table.ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before hdmx table!"))?.num_glyphs as usize)?),
                 TableTag::FontHeader =>
                     fnt.head_table = Some({ let v = FontHeader::from_binary(reader)?; /*println!("got head table = {:?}", v);*/ v } ),
                 TableTag::MaxProfile => {
                     fnt.maxp_table = Some(MaxProfileTable::from_binary(reader)?);
+
                     //println!("got maxp table = {:?}", fnt.maxp_table);
                 }
+                TableTag::HorizHeader => {
+                    fnt.hhea_table = Some(HorizHeaderTable::from_binary(reader)?);
+                }
+                TableTag::HorizMetrics => {
+                    fnt.hmtx_table = Some(HorizMetricsTable::from_binary(reader,
+                                             fnt.maxp_table.as_ref().ok_or(io::Error::new(io::ErrorKind::Other, "Must load maxp table before loca table!"))?.num_glyphs as usize,
+                                             fnt.hhea_table.as_ref().ok_or(io::Error::new(io::ErrorKind::Other, "Must load hhea table before loca table!"))?.num_long_horz_metric as usize)?);
+                }
+                
                 _ =>  { /*println!("Unknown table tag: {:?}!", tde.tag);*/ continue; }
             }
         }
