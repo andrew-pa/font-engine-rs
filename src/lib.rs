@@ -70,7 +70,6 @@ fn wrap(i: usize, start: usize, end: usize) -> usize {
 impl Glyph {
     pub fn from_truetype(font: &truetype_loader::SfntFont, index: usize) -> Option<Glyph> {
         use truetype_loader::*;
-        //println!("{:?}", glyph);
         font.glyf_table.as_ref().and_then(|table| match &table.glyphs[index] {
             &GlyphDescription::Simple { 
                 num_contours, x_min, x_max, y_min, y_max, ref end_points_of_contours, ref instructions, points: ref spoints 
@@ -87,7 +86,6 @@ impl Glyph {
                     while i < endpoint as usize {
                         if spoints[i].on_curve {
                             curves.push(Curve::Line(last_point as usize, i as usize));
-                            println!("{} {}", last_point, i);
                             last_point = i;
                             i += 1;
                         } else {
@@ -203,6 +201,13 @@ impl Curve {
                 if det < 0.0 { return; }
                 let sqrt_det = det.sqrt();
                 let denom = -a + 2.0*b - c;
+                if denom.abs() < 0.0001 {
+                    let t = (y - a) / (2.0*(b-a));
+                    if inside(t, 0.0, 1.0) {
+                        result.push((1.0-t)*(1.0-t)*points[start].x + 2.0*(1.0-t)*t*points[ctrl].x + t*t*points[end].x);
+                    }
+                    //return;
+                }
                 let t1 = (-sqrt_det - a + b) / denom;
                 let t2 = (sqrt_det - a + b) / denom;
                 if inside(t1, 0.0, 1.0) {
@@ -220,7 +225,7 @@ impl Rasterizer {
 
     pub fn raster_glyph<'a>(&self, glyph: &Glyph, bitmap: &'a mut [u8], width: usize, point_size: f32, offset: (f32,f32)) -> &'a [u8] {
         let scale = point_size * self.output_dpi / (72f32 * self.units_per_em);
-        println!("scale = {}", scale);
+        //println!("scale = {}", scale);
         let height = bitmap.len() / width;
         let points: Vec<Point> = glyph.points.iter().map(|&p| Point {
             x: p.x * scale + 8.0 + offset.0, 
@@ -299,13 +304,13 @@ mod tests {
         doc
     }
 
-    const test_glyph_index: usize = 9;
+    const test_glyph_index: usize = 74;
     #[cfg(target_os="windows")]
     const FONT_PATH: &'static str = 
         "C:\\Windows\\Fonts\\arial.ttf";
     #[cfg(target_os="macos")]
     const FONT_PATH: &'static str = 
-        "/Library/Fonts/Arial.ttf";
+        "/Library/Fonts/Times New Roman.ttf";
 
     #[test]
     fn load_truetype_svg_out() {
@@ -325,8 +330,8 @@ mod tests {
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
         let g = Glyph::from_truetype(&font, test_glyph_index).unwrap();
         let mut doc = glyph_to_svg(&g, 1.0f32);
-        for iy in (0u32..90u32) {
-            let y = (iy as f32) * 32.0;
+        for iy in (0u32..900u32) {
+            let y = (iy as f32) * 8.0 - 1200.0;
             let mut ipoints = Vec::new();
             for curve in g.curves.iter() {
                 curve.intersect_scanline(&g.points, y, &mut ipoints);
@@ -370,25 +375,28 @@ mod tests {
         println!("hhea: {:?}", font.hhea_table);
 
         let rr = Rasterizer { output_dpi: 144f32, units_per_em: font.head_table.expect("head table").units_per_em as f32 };
-        let point_size = 72.0;
+        let point_size = 80.;
         let scale = point_size * rr.output_dpi / (72f32 * rr.units_per_em);
         println!("u/em = {}", rr.units_per_em);
         let mut bm = Vec::new();
-        bm.resize(1024*512, 0u8);
+        let width: usize = 8192;
+        bm.resize(width*512, 0u8);
 
-        let s = "@Test~String!$&";
+        let s = "{[(thequickbrownfoxjumpsoverthelazydog!@#$%^&*~)]}";
         let cm = CharMap::from_truetype(&font);
         let mut offset = (8.0, 8.0);
         for c in s.chars() {
             let gi = cm.map(c);
+            print!("{} ", gi);
             let g = Glyph::from_truetype(&font, gi).expect("load glyph");
-            rr.raster_glyph(&g, &mut bm[..], 1024, point_size, offset);
+            rr.raster_glyph(&g, &mut bm[..], width, point_size, offset);
             offset.0 += font.hmtx_table.as_ref().map(|hmtx| hmtx.metrics[gi].advance_width as f32 * scale).unwrap();
         }
+        println!();
 
         //rr.raster_glyph(&g, &mut bm[..], 512, 24f32);
 
-        let im = ImageBuffer::from_raw(1024,512,bm).unwrap();
+        let im = ImageBuffer::from_raw(width as u32,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lstrout.png")).expect("creating output file");
         let _ = image::ImageLuma8(im).save(fout, image::PNG);
 
