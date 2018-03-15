@@ -6,6 +6,8 @@ use byteorder::{ByteOrder, BigEndian, ReadBytesExt};
 
 use super::*;
 
+use numerics::F2dot14;
+
 #[derive(Debug)]
 pub enum Transformation {
     Uniform(F2dot14),
@@ -198,18 +200,18 @@ impl GlyphDescription {
                         (arg12 as u16 >> 8, arg12 as u16 & 0x00ff)
                     };
                 let tf = if flags.intersects(CGF_SIMPLE_SCALE) {
-                    Transformation::Uniform(F2dot14(reader.read_i16::<BigEndian>()?))
+                    Transformation::Uniform(F2dot14::new(reader.read_i16::<BigEndian>()?))
                 } else if flags.intersects(CGF_XY_SCALE) {
-                    Transformation::XY(F2dot14(reader.read_i16::<BigEndian>()?), F2dot14(reader.read_i16::<BigEndian>()?))
+                    Transformation::XY(F2dot14::new(reader.read_i16::<BigEndian>()?), F2dot14::new(reader.read_i16::<BigEndian>()?))
                 } else if flags.intersects(CGF_2X2_TRANSFORM) {
                     Transformation::Mat2x2 {
-                        xscale: F2dot14(reader.read_i16::<BigEndian>()?), 
-                        scale01:F2dot14(reader.read_i16::<BigEndian>()?), 
-                        scale10:F2dot14(reader.read_i16::<BigEndian>()?), 
-                        yscale: F2dot14(reader.read_i16::<BigEndian>()?) 
+                        xscale: F2dot14::new(reader.read_i16::<BigEndian>()?), 
+                        scale01:F2dot14::new(reader.read_i16::<BigEndian>()?), 
+                        scale10:F2dot14::new(reader.read_i16::<BigEndian>()?), 
+                        yscale: F2dot14::new(reader.read_i16::<BigEndian>()?) 
                     }
                 } else {
-                    Transformation::Uniform(F2dot14(0b0100_0000_0000_0000))
+                    Transformation::Uniform(F2dot14::new(0b0100_0000_0000_0000))
                 }; 
 
                 //TODO: Apple's manual has some math that seems to generate a matrix. Should that

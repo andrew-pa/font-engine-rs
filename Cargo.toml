@@ -4,8 +4,10 @@ version = "0.1.0"
 authors = ["Andrew <andrew.pa@outlook.com>"]
 
 [dependencies]
-byteorder = "1.0.0"
-bitflags = "0.7.0"
+byteorder = "1.0"
+bitflags = "0.7"
+fix = "0.1"
+typenum = "1.9"
 
 [dev-dependencies]
 svg = "0.5.4"

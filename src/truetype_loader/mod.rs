@@ -40,10 +40,6 @@ impl Fixed {
     }
 }
 
-//TODO: Change this so that it just converts to float, silly fixed point is silly
-#[derive(Copy, Clone, Debug)]
-pub struct F2dot14(i16);
-
 macro_rules! table_tag_code {
     ($a:expr, $b:expr, $c:expr, $d:expr) => (($a as u32) << 24 | ($b as u32) << 16 | ($c as u32) << 8 | ($d as u32));
 }
