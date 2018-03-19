@@ -7,6 +7,7 @@ extern crate fix;
 extern crate typenum;
 mod truetype_loader;
 mod numerics;
+mod interp_instructor;
 
 use std::error::Error;
 
@@ -39,7 +40,7 @@ pub enum Curve {
 #[derive(Debug)]
 pub struct Glyph {
     curves: Vec<Curve>,
-    points: Vec<Point>,
+    points: Vec<Point>
 }
 
 struct CharMap<'fontdata> {
@@ -77,16 +78,16 @@ fn wrap(i: usize, start: usize, end: usize) -> usize {
 }
 
 impl Glyph {
-    pub fn from_truetype(font: &truetype_loader::SfntFont, index: usize) -> Option<Glyph> {
+    pub fn from_truetype_with_points(ttf_glyph: &truetype_loader::GlyphDescription, cpoints: Vec<Point>) -> Option<Glyph> {
         use truetype_loader::*;
         //println!("{:?}", glyph);
-        font.glyf_table.as_ref().and_then(|table| match &table.glyphs[index] {
+        match ttf_glyph {
             &GlyphDescription::Simple { 
                 num_contours, x_min, x_max, y_min, y_max, ref end_points_of_contours, ref instructions, points: ref spoints 
             } => {
                 let mut curves = Vec::new();
-                let mut points = spoints.iter()
-                    .map(|&GlyphPoint { x, y, .. }| Point { x: x as f32, y: y as f32 }).collect::<Vec<_>>();
+                let mut points = cpoints.clone();
+                //    .map(|&GlyphPoint { x, y, .. }| Point { x: x as f32, y: y as f32 }).collect::<Vec<_>>();
                 let mut last_endpoint = 0;
                 for &ep in end_points_of_contours {
                     let endpoint = ep as usize + 1;
@@ -100,22 +101,22 @@ impl Glyph {
                             last_point = i;
                             i += 1;
                         } else {
-                            let mut a = spoints[i]; let mut ia = i;
+                            let mut a = points[i]; let mut ia = i;
                             i += 1; let mut ib = wrap(i, last_endpoint, endpoint);
-                            let mut b = spoints[ib];
-                            if b.on_curve {
+                            let mut b = points[ib];
+                            if spoints[ib].on_curve {
                                 curves.push(Curve::Quad(last_point, ia, ib));
                                 last_point = ib;
                             } else {
-                                while !b.on_curve {
-                                    let midx = (a.x + b.x) / 2;
-                                    let midy = (a.y + b.y) / 2;
+                                while !spoints[ib].on_curve {
+                                    let midx = (a.x + b.x) / 2.0;
+                                    let midy = (a.y + b.y) / 2.0;
                                     let im = points.len();
                                     points.push(Point { x: midx as f32, y: midy as f32 });
                                     curves.push(Curve::Quad(last_point, ia, im)); last_point = im;
                                     a = b; ia = ib;
                                     i += 1; ib = wrap(i,last_endpoint,endpoint);
-                                    b = spoints[ib];
+                                    b = points[ib];
                                 }
                                 curves.push(Curve::Quad(last_point, ia, ib)); last_point = ib;
                             }
@@ -124,44 +125,55 @@ impl Glyph {
                     curves.push(Curve::Line(last_point, last_endpoint));
                     last_endpoint = endpoint;
                 }
-
                 Some(Glyph { curves, points })
             },
             &GlyphDescription::Composite { .. } => None,
             &GlyphDescription::None => None
-        })
+        }
+    }
+
+    pub fn from_truetype(ttf_glyph: &truetype_loader::GlyphDescription) -> Option<Glyph> {
+        match ttf_glyph {
+            &truetype_loader::GlyphDescription::Simple { ref points, .. } =>
+                Glyph::from_truetype_with_points(ttf_glyph, points.iter().map(|&truetype_loader::GlyphPoint { x, y, .. }| Point { x: x as f32, y: y as f32 }).collect()),
+            _ => None
+        }
     }
 }
 
 pub trait GlyphScaler {
     fn uniform_scale(&self, point_size: f32) -> f32;
-    fn scale_glyph(&self, point_size: f32, glyph: &Glyph, offset: Point) -> Vec<Point>;
+    fn scale_glyph(&self, point_size: f32, glyph_index: usize, offset: Point) -> Result<Glyph, Box<Error>>;
 }
 
-pub struct SimpleGlyphScaler {
+pub struct SimpleGlyphScaler<'f> {
+    glyph_table: &'f truetype_loader::GlyphDataTable,
     output_dpi: f32,
     units_per_em: f32
 }
 
-impl SimpleGlyphScaler {
-    fn new(font: &truetype_loader::SfntFont, dpi: f32) -> SimpleGlyphScaler {
-        SimpleGlyphScaler {
+impl<'f> SimpleGlyphScaler<'f> {
+    fn new(font: &'f truetype_loader::SfntFont, dpi: f32) -> Result<SimpleGlyphScaler<'f>, Box<Error>> {
+        Ok(SimpleGlyphScaler {
             output_dpi: dpi,
-            units_per_em: font.head_table.expect("font has head table").units_per_em as f32
-        }
+            units_per_em: font.head_table.ok_or("font missnig head table")?.units_per_em as f32,
+            glyph_table: font.glyf_table.as_ref().ok_or("font missing glyph table")?
+        })
     }
 }
 
-impl GlyphScaler for SimpleGlyphScaler {
+impl<'f> GlyphScaler for SimpleGlyphScaler<'f> {
     fn uniform_scale(&self, point_size: f32) -> f32 {
         point_size * self.output_dpi / (72f32 * self.units_per_em)
     }
-    fn scale_glyph(&self, point_size: f32, glyph: &Glyph, offset: Point) -> Vec<Point> {
+    fn scale_glyph(&self, point_size: f32, glyph_index: usize, offset: Point) -> Result<Glyph, Box<Error>> {
         let scale = self.uniform_scale(point_size);
-        glyph.points.iter().map(|&p| Point {
-            x: p.x * scale + 8.0 + offset.x, 
-            y: (self.units_per_em-p.y) * scale + offset.y
-        }).collect()
+        let mut g = Glyph::from_truetype(&self.glyph_table.glyphs[glyph_index]).ok_or("glyph from truetype")?;
+        for p in g.points.iter_mut() {
+            p.x = p.x * scale + 8.0 + offset.x; 
+            p.y = (self.units_per_em-p.y) * scale + offset.y;
+        }
+        Ok(g)
     }
 }
 
@@ -256,18 +268,19 @@ impl<S: GlyphScaler> Rasterizer<S> {
         //point_size * self.output_dpi / (72f32 * self.units_per_em)
     }
 
-    pub fn raster_glyph<'a>(&self, glyph: &Glyph, bitmap: &'a mut [u8], width: usize, point_size: f32, offset: Point) -> &'a [u8] {
+    pub fn raster_glyph<'a>(&self, glyph_index: usize, bitmap: &'a mut [u8], width: usize, point_size: f32, offset: Point) -> Result<&'a [u8], Box<Error>> {
         let height = bitmap.len() / width;
         //scale & grid fit the outline
         // this involves interpreting some instructions
-        let points: Vec<Point> = self.scaler.scale_glyph(point_size, glyph, offset);
+        let glyph = self.scaler.scale_glyph(point_size, glyph_index, offset)?;
         //rasterize by scan line
         for y in 0..height {
             let mut xs = Vec::new();
             for curve in &glyph.curves {
-                curve.intersect_scanline(&points, y as f32 + 0.5, &mut xs);
+                curve.intersect_scanline(&glyph.points, y as f32 + 0.5, &mut xs);
             }
-            xs.sort_unstable_by(|a, b| if *a < *b { ::std::cmp::Ordering::Less } else { ::std::cmp::Ordering::Greater });
+            use std::cmp::Ordering;
+            xs.sort_unstable_by(|a, b| if *a < *b { Ordering::Less } else { Ordering::Greater });
             for px in xs.chunks(2) {
                 if px.len() != 2 { continue; }
                 for x in (px[0] as usize)..(px[1] as usize) {
@@ -279,7 +292,7 @@ impl<S: GlyphScaler> Rasterizer<S> {
             println!("{:?}", p);
             bitmap[(p.x as usize) + (p.y.abs() as usize)*width] = 128;
         }*/
-        bitmap
+        Ok(bitmap)
     }
 }
 
@@ -346,7 +359,7 @@ mod tests {
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
 
-        let g = Glyph::from_truetype(&font, test_glyph_index).unwrap();
+        let g = Glyph::from_truetype(font.glyf_table.as_ref().map(|t| &t.glyphs[test_glyph_index]).expect("load glyph")).unwrap();
         let doc = glyph_to_svg(&g, 0.5f32);
         svg::save("glyph_conv.svg", &doc).unwrap();
     }
@@ -377,7 +390,8 @@ mod tests {
         use truetype_loader::*;
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
-        let g = Glyph::from_truetype(&font, test_glyph_index).unwrap();
+        let g = Glyph::from_truetype(font.glyf_table.as_ref()
+                                     .map(|t| &t.glyphs[test_glyph_index]).expect("load glyph")).unwrap();
         let mut doc = glyph_to_svg(&g, 1.0f32);
         for iy in (0u32..90u32) {
             let y = (iy as f32) * 32.0;
@@ -400,15 +414,13 @@ mod tests {
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
         
-        let g = Glyph::from_truetype(&font, test_glyph_index).unwrap();
-
         let rr = Rasterizer {
-            scaler: SimpleGlyphScaler::new(&font, 144.0)
+            scaler: SimpleGlyphScaler::new(&font, 144.0).expect("create scaler")
         };
         let mut bm = Vec::new();
         bm.resize(512*512, 0u8);
 
-        rr.raster_glyph(&g, &mut bm[..], 512, 24f32, Point::new(32.0, 32.0));
+        rr.raster_glyph(test_glyph_index, &mut bm[..], 512, 140.0, Point::new(32.0, 32.0));
 
         let im = ImageBuffer::from_raw(512,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lgloutt.png")).expect("creating output file");
@@ -425,7 +437,7 @@ mod tests {
         println!("hhea: {:?}", font.hhea_table);
 
         let rr = Rasterizer {
-            scaler: SimpleGlyphScaler::new(&font, 144.0)
+            scaler: SimpleGlyphScaler::new(&font, 144.0).expect("create scaler")
         };
         let mut bm = Vec::new();
         bm.resize(1024*1024, 0u8);
@@ -438,9 +450,10 @@ mod tests {
             let mut offset = Point::new(8.0, 8.0 + (i as f32) * 50.0);
             for c in s.chars() {
                 let gi = cm.map(c);
-                let g = Glyph::from_truetype(&font, gi).expect("load glyph");
-                rr.raster_glyph(&g, &mut bm[..], 1024, point_size, offset);
-                offset.x += font.hmtx_table.as_ref().map(|hmtx| hmtx.metrics[gi].advance_width as f32 * rr.scale(point_size)).unwrap();
+                //let g = Glyph::from_truetype(&font, gi).expect("load glyph");
+                rr.raster_glyph(gi, &mut bm[..], 1024, point_size, offset);
+                offset.x += font.hmtx_table.as_ref()
+                    .map(|hmtx| hmtx.metrics[gi].advance_width as f32 * rr.scaler.uniform_scale(point_size)).unwrap();
             }
 
             point_size *= 2.0;
@@ -450,6 +463,43 @@ mod tests {
 
         let im = ImageBuffer::from_raw(1024,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lstrout.png")).expect("creating output file");
+        let _ = image::ImageLuma8(im).save(fout, image::PNG);
+
+    }
+
+    #[test]
+    fn load_truetype_raster_hinted_string() {
+        use truetype_loader::*;
+        let mut font_file = File::open(FONT_PATH).unwrap();
+        let font = SfntFont::from_binary(&mut font_file).expect("load font data");
+
+        let rr = Rasterizer {
+            scaler: interp_instructor::InstructedGlyphScaler::new(&font, 144.0).expect("create scaler")
+        };
+        let mut bm = Vec::new();
+        bm.resize(1024*1024, 0u8);
+
+        let mut point_size = 8.0;
+
+        for i in 0..4 {
+            let s = "@Test~String!$&";
+            let cm = CharMap::from_truetype(&font);
+            let mut offset = Point::new(8.0, 8.0 + (i as f32) * 50.0);
+            for c in s.chars() {
+                let gi = cm.map(c);
+                //let g = Glyph::from_truetype(&font, gi).expect("load glyph");
+                rr.raster_glyph(gi, &mut bm[..], 1024, point_size, offset).expect("rasterized glyph");
+                offset.x += font.hmtx_table.as_ref()
+                    .map(|hmtx| hmtx.metrics[gi].advance_width as f32 * rr.scaler.uniform_scale(point_size)).unwrap();
+            }
+
+            point_size *= 2.0;
+        }
+
+        //rr.raster_glyph(&g, &mut bm[..], 512, 24f32);
+
+        let im = ImageBuffer::from_raw(1024,512,bm).unwrap();
+        let ref mut fout = File::create(&Path::new("hstrout.png")).expect("creating output file");
         let _ = image::ImageLuma8(im).save(fout, image::PNG);
 
     }

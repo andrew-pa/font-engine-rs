@@ -5,7 +5,26 @@ use fix;
 use typenum;
 
 pub type F2dot14 = fix::aliases::binary::IFix16<typenum::N14>;
-pub type F26dot6 = fix::aliases::binary::IFix32<typenum::N6>;
+
+pub struct F26d6(i32);
+
+impl From<i32> for F26d6 {
+    fn from(v: i32) -> F26d6 {
+        F26d6(v << 6)
+    }
+}
+
+impl From<f32> for F26d6 {
+    fn from(v: f32) -> F26d6 {
+        let i = v.floor() as i32;
+        let f = (v.fract().abs() * 64.0).ceil() as i32;
+        F26d6(i << 6 | (f & 0x0000_004f))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+}
 
 /*#[derive(Copy, Clone, Debug)]
 pub struct F2dot14(u16);
