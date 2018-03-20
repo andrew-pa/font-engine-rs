@@ -22,6 +22,67 @@ impl From<f32> for F26d6 {
     }
 }
 
+impl Into<u32> for F26d6 {
+    fn into(self) -> u32 {
+        self.0 as u32
+    }
+}
+
+impl Into<f32> for F26d6 {
+    fn into(self) -> f32 {
+        self.0 as f32
+    }
+}
+
+impl F26d6 {
+    pub fn abs(self) -> F26d6 {
+        F26d6(self.0.abs())
+    }
+
+    pub fn floor(self) -> F26d6 {
+        F26d6(self.0 & 0xffff_ffc0)
+    }
+
+    pub fn ceil(self) -> F26d6 {
+        F26d6(self.0 & 0xffff_ffc0)
+    }
+}
+
+use std::ops::*;
+
+impl Add<F26d6> for F26d6 {
+    type Output = F26d6;
+    fn add(self, othr: F26d6) -> F26d6 {
+        F26d6(self.0 + othr.0)
+    }
+}
+impl Sub<F26d6> for F26d6 {
+    type Output = F26d6;
+    fn sub(self, othr: F26d6) -> F26d6 {
+        F26d6(self.0 - othr.0)
+    }
+}
+impl Mul<F26d6> for F26d6 {
+    type Output = F26d6;
+    fn mul(self, othr: F26d6) -> F26d6 {
+        F26d6(self.0 * othr.0)
+    }
+}
+impl Div<F26d6> for F26d6 {
+    type Output = F26d6;
+    fn div(self, othr: F26d6) -> F26d6 {
+        F26d6(self.0 / othr.0)
+    }
+}
+
+impl Neg for F26d6 {
+    type Output = F26d6;
+    fn neg(self) -> F26d6 {
+        F26d6(-self.0)
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
 }
