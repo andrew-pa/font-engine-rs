@@ -68,7 +68,7 @@ pub enum TableTag {
     HorizDevMetric = table_tag_code!('h', 'd', 'm', 'x'),
     Kerning = table_tag_code!('k', 'e', 'r', 'n'),
     LinearThreshold = table_tag_code!('L', 'T', 'S', 'H'),
-    CVTProgram = table_tag_code!('p', 'r', 'e', 'p'),
+    PreProgram = table_tag_code!('p', 'r', 'e', 'p'),
     PCL5 = table_tag_code!('P', 'C', 'L', 'T'),
     VertDevMetrics = table_tag_code!('V', 'D', 'M', 'X'),
     VertHeader = table_tag_code!('v', 'h', 'e', 'a'),
@@ -91,7 +91,7 @@ pub use self::char_glyph_mapping_table::*;
 mod glyph_data_table;
 pub use self::glyph_data_table::*;
 
-pub struct ControlValueTable(Vec<i16>);
+pub struct ControlValueTable(pub Vec<i16>);
 
 impl Table for ControlValueTable {
     fn tag(&self) -> TableTag { TableTag::ControlValue }
@@ -103,7 +103,7 @@ impl Debug for ControlValueTable {
     }
 }
 
-pub struct FontProgram(Vec<u8>);
+pub struct FontProgram(pub Vec<u8>);
 
 impl Table for FontProgram {
     fn tag(&self) -> TableTag { TableTag::FontProgram }
@@ -447,6 +447,7 @@ pub struct SfntFont {
     pub cmap_table: Option<CharGlyphMappingTable>,
     pub cval_table: Option<ControlValueTable>,
     pub fprg_table: Option<FontProgram>,
+    pub prep_table: Option<FontProgram>,
     pub gasp_table: Option<GASPTable>,
     pub glyf_table: Option<GlyphDataTable>,
     pub loca_table: Option<LocationTable>,
@@ -484,6 +485,7 @@ impl SfntFont {
             cmap_table: None,
             cval_table: None,
             fprg_table: None,
+            prep_table: None,
             gasp_table: None,
             glyf_table: None,
             loca_table: None,
@@ -509,6 +511,11 @@ impl SfntFont {
                     let mut tbl = vec![0u8; tde.length as usize];
                     reader.read_exact(tbl.as_mut_slice())?;
                     fnt.fprg_table = Some(FontProgram(tbl))
+                },
+                TableTag::PreProgram => {
+                    let mut tbl = vec![0u8; tde.length as usize];
+                    reader.read_exact(tbl.as_mut_slice())?;
+                    fnt.prep_table = Some(FontProgram(tbl))
                 },
                 TableTag::GridFitAndScanConvertProc =>
                     fnt.gasp_table = Some(GASPTable::from_binary(reader)?),

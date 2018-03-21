@@ -142,20 +142,21 @@ impl Glyph {
 }
 
 pub trait GlyphScaler {
-    fn uniform_scale(&self, point_size: f32) -> f32;
-    fn scale_glyph(&self, point_size: f32, glyph_index: usize, offset: Point) -> Result<Glyph, Box<Error>>;
+    fn uniform_scale(&self) -> f32;
+    fn scale_glyph(&mut self, glyph_index: usize, offset: Point) -> Result<Glyph, Box<Error>>;
 }
 
 pub struct SimpleGlyphScaler<'f> {
     glyph_table: &'f truetype_loader::GlyphDataTable,
     output_dpi: f32,
-    units_per_em: f32
+    units_per_em: f32,
+    point_size: f32
 }
 
 impl<'f> SimpleGlyphScaler<'f> {
-    fn new(font: &'f truetype_loader::SfntFont, dpi: f32) -> Result<SimpleGlyphScaler<'f>, Box<Error>> {
+    fn new(font: &'f truetype_loader::SfntFont, dpi: f32, point_size: f32) -> Result<SimpleGlyphScaler<'f>, Box<Error>> {
         Ok(SimpleGlyphScaler {
-            output_dpi: dpi,
+            output_dpi: dpi, point_size,
             units_per_em: font.head_table.ok_or("font missnig head table")?.units_per_em as f32,
             glyph_table: font.glyf_table.as_ref().ok_or("font missing glyph table")?
         })
@@ -163,11 +164,11 @@ impl<'f> SimpleGlyphScaler<'f> {
 }
 
 impl<'f> GlyphScaler for SimpleGlyphScaler<'f> {
-    fn uniform_scale(&self, point_size: f32) -> f32 {
-        point_size * self.output_dpi / (72f32 * self.units_per_em)
+    fn uniform_scale(&self) -> f32 {
+        self.point_size * self.output_dpi / (72f32 * self.units_per_em)
     }
-    fn scale_glyph(&self, point_size: f32, glyph_index: usize, offset: Point) -> Result<Glyph, Box<Error>> {
-        let scale = self.uniform_scale(point_size);
+    fn scale_glyph(&mut self, glyph_index: usize, offset: Point) -> Result<Glyph, Box<Error>> {
+        let scale = self.uniform_scale();
         let mut g = Glyph::from_truetype(&self.glyph_table.glyphs[glyph_index]).ok_or("glyph from truetype")?;
         for p in g.points.iter_mut() {
             p.x = p.x * scale + 8.0 + offset.x; 
@@ -263,16 +264,16 @@ impl Curve {
 }
 
 impl<S: GlyphScaler> Rasterizer<S> {
-    pub fn scale(&self, point_size: f32) -> f32 {
-        self.scaler.uniform_scale(point_size)
+    pub fn scale(&self) -> f32 {
+        self.scaler.uniform_scale()
         //point_size * self.output_dpi / (72f32 * self.units_per_em)
     }
 
-    pub fn raster_glyph<'a>(&self, glyph_index: usize, bitmap: &'a mut [u8], width: usize, point_size: f32, offset: Point) -> Result<&'a [u8], Box<Error>> {
+    pub fn raster_glyph<'a>(&mut self, glyph_index: usize, bitmap: &'a mut [u8], width: usize, offset: Point) -> Result<&'a [u8], Box<Error>> {
         let height = bitmap.len() / width;
         //scale & grid fit the outline
         // this involves interpreting some instructions
-        let glyph = self.scaler.scale_glyph(point_size, glyph_index, offset)?;
+        let glyph = self.scaler.scale_glyph(glyph_index, offset)?;
         //rasterize by scan line
         for y in 0..height {
             let mut xs = Vec::new();
@@ -414,13 +415,13 @@ mod tests {
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
         
-        let rr = Rasterizer {
-            scaler: SimpleGlyphScaler::new(&font, 144.0).expect("create scaler")
+        let mut rr = Rasterizer {
+            scaler: SimpleGlyphScaler::new(&font, 144.0, 140.0).expect("create scaler")
         };
         let mut bm = Vec::new();
         bm.resize(512*512, 0u8);
 
-        rr.raster_glyph(test_glyph_index, &mut bm[..], 512, 140.0, Point::new(32.0, 32.0));
+        rr.raster_glyph(test_glyph_index, &mut bm[..], 512, Point::new(32.0, 32.0));
 
         let im = ImageBuffer::from_raw(512,512,bm).unwrap();
         let ref mut fout = File::create(&Path::new("lgloutt.png")).expect("creating output file");
@@ -436,10 +437,7 @@ mod tests {
 
         println!("hhea: {:?}", font.hhea_table);
 
-        let rr = Rasterizer {
-            scaler: SimpleGlyphScaler::new(&font, 144.0).expect("create scaler")
-        };
-        let mut bm = Vec::new();
+                let mut bm = Vec::new();
         bm.resize(1024*1024, 0u8);
 
         let mut point_size = 8.0;
@@ -448,12 +446,17 @@ mod tests {
             let s = "@Test~String!$&";
             let cm = CharMap::from_truetype(&font);
             let mut offset = Point::new(8.0, 8.0 + (i as f32) * 50.0);
+
+            let mut rr = Rasterizer {
+                scaler: SimpleGlyphScaler::new(&font, 144.0, point_size).expect("create scaler")
+            };
+
             for c in s.chars() {
                 let gi = cm.map(c);
                 //let g = Glyph::from_truetype(&font, gi).expect("load glyph");
-                rr.raster_glyph(gi, &mut bm[..], 1024, point_size, offset);
+                rr.raster_glyph(gi, &mut bm[..], 1024, offset);
                 offset.x += font.hmtx_table.as_ref()
-                    .map(|hmtx| hmtx.metrics[gi].advance_width as f32 * rr.scaler.uniform_scale(point_size)).unwrap();
+                    .map(|hmtx| hmtx.metrics[gi].advance_width as f32 * rr.scaler.uniform_scale()).unwrap();
             }
 
             point_size *= 2.0;
@@ -473,9 +476,6 @@ mod tests {
         let mut font_file = File::open(FONT_PATH).unwrap();
         let font = SfntFont::from_binary(&mut font_file).expect("load font data");
 
-        let rr = Rasterizer {
-            scaler: interp_instructor::InstructedGlyphScaler::new(&font, 144.0).expect("create scaler")
-        };
         let mut bm = Vec::new();
         bm.resize(1024*1024, 0u8);
 
@@ -485,12 +485,15 @@ mod tests {
             let s = "@Test~String!$&";
             let cm = CharMap::from_truetype(&font);
             let mut offset = Point::new(8.0, 8.0 + (i as f32) * 50.0);
+            let mut rr = Rasterizer {
+                scaler: interp_instructor::InstructedGlyphScaler::new(&font, 144.0, point_size).expect("create scaler")
+            };
             for c in s.chars() {
                 let gi = cm.map(c);
                 //let g = Glyph::from_truetype(&font, gi).expect("load glyph");
-                rr.raster_glyph(gi, &mut bm[..], 1024, point_size, offset).expect("rasterized glyph");
+                rr.raster_glyph(gi, &mut bm[..], 1024, offset).expect("rasterized glyph");
                 offset.x += font.hmtx_table.as_ref()
-                    .map(|hmtx| hmtx.metrics[gi].advance_width as f32 * rr.scaler.uniform_scale(point_size)).unwrap();
+                    .map(|hmtx| hmtx.metrics[gi].advance_width as f32 * rr.scaler.uniform_scale()).unwrap();
             }
 
             point_size *= 2.0;
