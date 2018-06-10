@@ -49,6 +49,8 @@ impl Vector {
     }
 }
 
+use std::collections::{HashMap};
+
 #[derive(Debug, Clone)]
 struct InterpState {
     auto_flip: bool,
@@ -69,6 +71,7 @@ struct InterpState {
     zp: [usize; 3],
     twilight_zone: Vec<Point>,
     cv_table: Vec<i16>,
+    functions: HashMap<u32, Vec<u8>>
 }
 
 impl InterpState {
@@ -91,7 +94,8 @@ impl InterpState {
             single_width_value: 0.0,
             zp: [1,1,1],
             twilight_zone: Vec::new(),
-            cv_table
+            cv_table,
+            functions: HashMap::new()
         }
     }
 }
@@ -206,12 +210,27 @@ impl<'s, 'p> Interp<'s, 'p> {
                     while instructions[self.pc] != 0x59 {
                         self.pc += 1;
                     }
-                    self.pc += 1;
                 },
-                0x2d => { /* ENDF */ },
+                0x2d => { /* ENDF */ println!("ENDF without FDEF"); },
                 0x54 => self.compare(|a,b| a == b)?,
                 0x57 => { /* EVEN */ },
-                0x2c => { /* FDEF */ },
+                0x2c => { /* FDEF */
+                    let start = self.pc+1;
+                    let mut end = start;
+                    while instructions[end] != 0x2d {
+                        end += match instructions[end] {
+                            0x40 => instructions[end+1] as usize+1,
+                            0x41 => instructions[end+1] as usize*2+1,
+                            0xb0 ... 0xb7 => instructions[end] as usize - 0xaf + 1,
+                            0xb8 ... 0xbf => (instructions[end] as usize - 0xb7) * 2 + 1,
+                            _ => 1
+                        };
+                    }
+                    let id = self.pop()?;
+                    println!("function def #{} = [{:?}]", id, &instructions[start..end]);
+                    self.state.functions.insert(id, instructions[start..end].into());
+                    self.pc = end+1; //skip ENDF
+                },
                 0x4e => { self.state.auto_flip = false; },
                 0x4d => { self.state.auto_flip = true; },
                 0x80 => { /* FLIPPT */ },
@@ -225,7 +244,16 @@ impl<'s, 'p> Interp<'s, 'p> {
                 0x0c => { let (x,y) = (F26d6::from(self.state.project_vec.x), F26d6::from(self.state.project_vec.y)); self.push(x.into()); self.push(y.into()) },
                 0x52 => self.compare(|a,b| a > b)?,
                 0x53 => self.compare(|a,b| a >= b)?,
-                0x89 => { /* IDEF */ },
+                0x89 => { /* IDEF */
+                    let start = self.pc+1;
+                    let mut end = start;
+                    while instructions[end] != 0x2d {
+                        end += 1;
+                    }
+                    let id = self.pop()?;
+                    println!("instruction def #{} = [{:?}]", id, &instructions[start..end]);
+                    self.pc = end+1; //skip ENDF
+                }, 
                 0x58 => { /* IF */
                     let cond = self.pop()?;
                     if cond == 0 {
@@ -233,7 +261,6 @@ impl<'s, 'p> Interp<'s, 'p> {
                         while instructions[self.pc] != 0x1b || instructions[self.pc] != 0x59 {
                             self.pc += 1;
                         }
-                        self.pc += 1; //move one past so ELSE doesn't jump to EIF
                     }
                 },
                 0x8e => { /* INSTCTRL [cvt only] */ panic!("INSTCTRL only in CVT programs"); },
